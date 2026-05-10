@@ -153,7 +153,7 @@ h2 {
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 
-#start-btn, #resume-btn, #restart-btn {
+#start-btn, #resume-btn, #restart-btn, #debug-btn, #debug-back-btn, #debug-resume-btn {
   padding: 12px 36px;
   font-size: clamp(15px, 2.5vw, 22px);
   font-family: inherit;
@@ -166,7 +166,7 @@ h2 {
   min-width: 160px;
 }
 
-#start-btn:hover, #resume-btn:hover, #restart-btn:hover {
+#start-btn:hover, #resume-btn:hover, #restart-btn:hover, #debug-btn:hover, #debug-back-btn:hover, #debug-resume-btn:hover {
   background: linear-gradient(145deg, #a02030, var(--burgundy));
   box-shadow: 0 0 18px rgba(212, 160, 23, 0.45);
 }
@@ -253,6 +253,50 @@ button:focus-visible {
 }
 
 .answer-btn:disabled { cursor: default; }
+
+/* ── Sprite debug ───────────────────────────────────────────────────────── */
+
+#debug-screen {
+  justify-content: flex-start;
+  padding: 24px;
+  overflow: auto;
+}
+
+#debug-panel {
+  width: min(100%, 980px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+#debug-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#debug-back-btn, #debug-resume-btn {
+  min-width: 120px;
+  padding: 9px 18px;
+  font-size: 16px;
+}
+
+#debug-canvas {
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 130px);
+  background: #120025;
+  border: 2px solid var(--gold);
+  border-radius: 8px;
+}
 
 /* ── Game over ───────────────────────────────────────────────────────────── */
 

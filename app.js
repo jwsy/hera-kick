@@ -33,9 +33,12 @@ const HERA_X = 190;
 const SPRITE_W      = 1536;
 const SPRITE_H      = 1024;
 const SPRITE_COLS   = 4;
-const SPRITE_ROWS   = 3;
 const FRAME_W       = SPRITE_W / SPRITE_COLS;   // 384
-const FRAME_H       = SPRITE_H / SPRITE_ROWS;   // 341.33
+const FRAME_H       = FRAME_W;                  // cells are laid out on a 384px grid
+const FRAME_PAD     = 32;                       // avoid sampling grid lines between cells
+const RUN_FRAME_COUNT = 4;
+const RUN_DRAW_X = [-12, 8, 4, -4];             // keep active run frames visually centered
+const RUN_DRAW_Y = [0, 0, 0, 3];               // per-frame vertical offset (pixels, +down)
 const SPRITE_DRAW_H = 120;
 const SPRITE_DRAW_W = SPRITE_DRAW_H * (FRAME_W / FRAME_H);
 
@@ -45,6 +48,7 @@ const GameState = {
   RUNNING:      'RUNNING',
   QUESTION:     'QUESTION',
   PAUSED:       'PAUSED',
+  DEBUG:        'DEBUG',
   GAME_OVER:    'GAME_OVER',
 };
 
@@ -137,16 +141,130 @@ heraImg.onload = () => {
     if (y < H - 1) push(px + W);
   }
 
+  // Second pass: remove border-connected gray guide marks from each cell.
+  // Artist registration marks (~rgb 110–190, near-zero saturation) survive the
+  // white flood fill because min(r,g,b) < 190. Seed from each cell's four edges.
+  head = 0; tail = 0;
+  const pushGuide = (px) => {
+    if (isBg[px]) return;
+    const i4 = px << 2;
+    if (d[i4 + 3] < 40) return;
+    const r = d[i4], g = d[i4 + 1], b = d[i4 + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 25 && Math.min(r, g, b) > 100 && Math.max(r, g, b) < 195) {
+      isBg[px] = 1;
+      queue[tail++] = px;
+    }
+  };
+
+  for (let cellRow = 0; cellRow < Math.ceil(H / FRAME_H); cellRow++) {
+    for (let cellCol = 0; cellCol < SPRITE_COLS; cellCol++) {
+      const cx0 = cellCol * FRAME_W;
+      const cy0 = cellRow * FRAME_H;
+      const cx1 = Math.min(cx0 + FRAME_W, W);
+      const cy1 = Math.min(cy0 + FRAME_H, H);
+      for (let x = cx0; x < cx1; x++) { pushGuide(cy0 * W + x); pushGuide((cy1 - 1) * W + x); }
+      for (let y = cy0 + 1; y < cy1 - 1; y++) { pushGuide(y * W + cx0); pushGuide(y * W + cx1 - 1); }
+    }
+  }
+
+  while (head < tail) {
+    const px = queue[head++];
+    const x = px % W, y = (px / W) | 0;
+    if (x > 0)     pushGuide(px - 1);
+    if (x < W - 1) pushGuide(px + 1);
+    if (y > 0)     pushGuide(px - W);
+    if (y < H - 1) pushGuide(px + W);
+  }
+
+  const onGridLine = (x, y) => {
+    const gx = x % FRAME_W;
+    const gy = y % FRAME_H;
+    return gx <= 3 || gx >= FRAME_W - 4 || gy <= 3 || gy >= FRAME_H - 4;
+  };
+
   for (let i = 0; i < W * H; i++) {
     if (isBg[i]) {
       d[i * 4 + 3] = 0;
     } else {
+      const x = i % W;
+      const y = (i / W) | 0;
+      if (onGridLine(x, y)) {
+        d[i * 4 + 3] = 0;
+        continue;
+      }
+
       // Fade any remaining near-white fringe not reachable from the border
       const lo = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
       if (lo > 210) {
         d[i * 4 + 3] = Math.round(d[i * 4 + 3] * (235 - lo) / 25);
       }
     }
+  }
+
+  function clearThinFrameArtifacts(col, row) {
+    const x0 = col * FRAME_W;
+    const y0 = row * FRAME_H;
+    const fw = Math.min(FRAME_W, W - x0);
+    const fh = Math.min(FRAME_H, H - y0);
+    if (fw <= 0 || fh <= 0) return;
+
+    const seen = new Uint8Array(fw * fh);
+    const stack = [];
+    const pixels = [];
+
+    const alphaAt = (x, y) => d[((y0 + y) * W + x0 + x) * 4 + 3];
+    const clearAt = (x, y) => { d[((y0 + y) * W + x0 + x) * 4 + 3] = 0; };
+
+    for (let start = 0; start < fw * fh; start++) {
+      if (seen[start]) continue;
+      const sx = start % fw;
+      const sy = (start / fw) | 0;
+      if (alphaAt(sx, sy) <= 20) continue;
+
+      let minX = sx, maxX = sx, minY = sy, maxY = sy;
+      stack.length = 0;
+      pixels.length = 0;
+      seen[start] = 1;
+      stack.push(start);
+
+      while (stack.length) {
+        const p = stack.pop();
+        const x = p % fw;
+        const y = (p / fw) | 0;
+        pixels.push(p);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+
+        const neighbors = [
+          x > 0      ? p - 1  : -1,
+          x < fw - 1 ? p + 1  : -1,
+          y > 0      ? p - fw : -1,
+          y < fh - 1 ? p + fw : -1,
+        ];
+        for (const n of neighbors) {
+          if (n < 0 || seen[n]) continue;
+          const nx = n % fw;
+          const ny = (n / fw) | 0;
+          if (alphaAt(nx, ny) <= 20) continue;
+          seen[n] = 1;
+          stack.push(n);
+        }
+      }
+
+      const compW = maxX - minX + 1;
+      const compH = maxY - minY + 1;
+      const isThinSeparator = compW <= 10 && compH >= 12 && pixels.length >= 20;
+      const isGroundGuide = compW >= 40 && compH <= 10 && minY > fh * 0.55;
+      if (isThinSeparator || isGroundGuide) {
+        for (const p of pixels) clearAt(p % fw, (p / fw) | 0);
+      }
+    }
+  }
+
+  for (let row = 0; row < Math.ceil(SPRITE_H / FRAME_H); row++) {
+    for (let col = 0; col < SPRITE_COLS; col++) clearThinFrameArtifacts(col, row);
   }
 
   oc2.putImageData(id, 0, 0);
@@ -170,6 +288,9 @@ const pauseBtn = document.getElementById('pause-btn');
 const startScreen   = document.getElementById('start-screen');
 const qOverlay      = document.getElementById('question-overlay');
 const pausedScreen  = document.getElementById('paused-screen');
+const debugScreen   = document.getElementById('debug-screen');
+const debugCanvas   = document.getElementById('debug-canvas');
+const debugCtx      = debugCanvas.getContext('2d');
 const overScreen    = document.getElementById('gameover-screen');
 const rotateOverlay = document.getElementById('rotate-overlay');
 
@@ -181,6 +302,9 @@ const answerBtns  = document.querySelectorAll('.answer-btn');
 const finalScore  = document.getElementById('final-score');
 const bestOver    = document.getElementById('best-score-over');
 const startBtn    = document.getElementById('start-btn');
+const debugBtn    = document.getElementById('debug-btn');
+const debugBackBtn = document.getElementById('debug-back-btn');
+const debugResumeBtn = document.getElementById('debug-resume-btn');
 const resumeBtn   = document.getElementById('resume-btn');
 const restartBtn  = document.getElementById('restart-btn');
 
@@ -289,12 +413,14 @@ function genQuestion() {
 
 function setState(s) {
   state = s;
-  const running = s === GameState.RUNNING || s === GameState.QUESTION || s === GameState.PAUSED;
+  const running = s === GameState.RUNNING || s === GameState.QUESTION || s === GameState.PAUSED || s === GameState.DEBUG;
   hudEl.classList.toggle('hidden', !running);
   startScreen.classList.toggle('hidden', s !== GameState.START_SCREEN);
   qOverlay.classList.toggle('hidden',    s !== GameState.QUESTION);
   pausedScreen.classList.toggle('hidden', s !== GameState.PAUSED);
+  debugScreen.classList.toggle('hidden', s !== GameState.DEBUG);
   overScreen.classList.toggle('hidden',  s !== GameState.GAME_OVER);
+  if (s === GameState.DEBUG) drawSpriteDebug();
 }
 
 function startRun() {
@@ -348,6 +474,9 @@ function answerQuestion(idx) {
 
 function pause()  { if (state === GameState.RUNNING)  setState(GameState.PAUSED); }
 function resume() { if (state === GameState.PAUSED)   setState(GameState.RUNNING); }
+function openDebug() { if (state === GameState.PAUSED) setState(GameState.DEBUG); }
+function closeDebug() { if (state === GameState.DEBUG) setState(GameState.PAUSED); }
+function resumeFromDebug() { if (state === GameState.DEBUG) setState(GameState.RUNNING); }
 
 function endGame() {
   if (score > bestScore) { bestScore = Math.floor(score); saveBest(); }
@@ -424,7 +553,7 @@ function update(dt) {
   // Animation
   hera.fTimer += dt;
   if (hera.anim === 'run' && hera.fTimer > 0.11) {
-    hera.frame = (hera.frame + 1) % 4; hera.fTimer = 0;
+    hera.frame = (hera.frame + 1) % RUN_FRAME_COUNT; hera.fTimer = 0;
   }
   if (hera.anim === 'kick') {
     hera.kickTimer -= dt;
@@ -571,7 +700,7 @@ function drawGround() {
 // ─── Hera ─────────────────────────────────────────────────────────────────────
 
 function getSpriteFrame(anim, frame, kickTimer) {
-  if (anim === 'run')  return [frame % 4, 0];
+  if (anim === 'run')  return [frame % RUN_FRAME_COUNT, 0];
   if (anim === 'jump') return [1, 1];
   // Kick: pose/extension first, then impact-with-sparks
   if (anim === 'kick') return kickTimer > 0.175 ? [2, 1] : [3, 1];
@@ -610,13 +739,17 @@ function drawHera() {
 
   if (heraSpriteReady) {
     const [col, row] = getSpriteFrame(anim, frame, kickTimer);
-    const sx = col * FRAME_W;
-    // Integer row boundaries avoid sub-pixel bleed into the white border between rows
-    const sy = Math.round(row * FRAME_H);
-    const sh = Math.round((row + 1) * FRAME_H) - sy;
-    const drawX = cx - SPRITE_DRAW_W / 2;
-    const drawY = y + HERA_H - SPRITE_DRAW_H;   // feet anchored to collision bottom
-    ctx.drawImage(heraSpriteCanvas, sx, sy, FRAME_W, sh, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
+    // Kick frames have the body pushed into the left pad zone; sample from the
+    // cell's left edge (no left pad) so the torso isn't clipped.
+    const kickXShift = (anim === 'kick') ? FRAME_PAD : 0;
+    const sx = col * FRAME_W + FRAME_PAD - kickXShift;
+    const sy = row * FRAME_H + FRAME_PAD;
+    const sw = FRAME_W - FRAME_PAD * 2;
+    const sh = FRAME_H - FRAME_PAD * 2;
+    const drawX = cx - SPRITE_DRAW_W / 2 + (anim === 'run' ? RUN_DRAW_X[col] : 0)
+                  - kickXShift * (SPRITE_DRAW_W / sw);
+    const drawY = y + HERA_H - SPRITE_DRAW_H + (anim === 'run' ? RUN_DRAW_Y[col] : 0);
+    ctx.drawImage(heraSpriteCanvas, sx, sy, sw, sh, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
   } else {
     // Fallback while sprite loads
     ctx.fillStyle = '#9b1c1c';
@@ -626,6 +759,82 @@ function drawHera() {
   }
 
   ctx.restore();
+}
+
+function drawDebugSpriteFrame(label, col, row, x, y, scale = 0.5, active = true) {
+  const w = FRAME_W * scale;
+  const h = FRAME_H * scale;
+  debugCtx.save();
+  debugCtx.fillStyle = 'rgba(255,255,255,0.04)';
+  debugCtx.fillRect(x, y, w, h);
+  debugCtx.strokeStyle = active ? 'rgba(240,192,64,0.65)' : 'rgba(240,224,255,0.3)';
+  debugCtx.lineWidth = 1;
+  debugCtx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  debugCtx.strokeStyle = 'rgba(96,200,255,0.5)';
+  debugCtx.beginPath();
+  debugCtx.moveTo(x + w / 2, y);
+  debugCtx.lineTo(x + w / 2, y + h);
+  debugCtx.moveTo(x, y + h - 24);
+  debugCtx.lineTo(x + w, y + h - 24);
+  debugCtx.stroke();
+
+  // Red dashed ground reference: where feet should anchor relative to draw region
+  const groundLineY = y + h - SPRITE_DRAW_H * scale;
+  debugCtx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+  debugCtx.lineWidth = 1.5;
+  debugCtx.setLineDash([4, 3]);
+  debugCtx.beginPath();
+  debugCtx.moveTo(x, groundLineY);
+  debugCtx.lineTo(x + w, groundLineY);
+  debugCtx.stroke();
+  debugCtx.setLineDash([]);
+  debugCtx.fillStyle = 'rgba(255,80,80,0.9)';
+  debugCtx.font = '10px monospace';
+  debugCtx.fillText('GND', x + w - 28, groundLineY - 2);
+
+  if (heraSpriteReady) {
+    const sx = col * FRAME_W + FRAME_PAD;
+    const sy = row * FRAME_H + FRAME_PAD;
+    const sw = FRAME_W - FRAME_PAD * 2;
+    const sh = FRAME_H - FRAME_PAD * 2;
+    debugCtx.imageSmoothingEnabled = false;
+    debugCtx.drawImage(heraSpriteCanvas, sx, sy, sw, sh, x, y, w, h);
+  }
+
+  debugCtx.fillStyle = '#f0c040';
+  debugCtx.font = '14px Georgia, serif';
+  debugCtx.fillText(label, x, y + h + 18);
+  if (!active) {
+    debugCtx.fillStyle = 'rgba(13,0,32,0.62)';
+    debugCtx.fillRect(x, y, w, h);
+    debugCtx.fillStyle = '#f0e0ff';
+    debugCtx.fillText('not used', x + 62, y + h / 2);
+  }
+  debugCtx.restore();
+}
+
+function drawSpriteDebug() {
+  debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+  debugCtx.fillStyle = '#120025';
+  debugCtx.fillRect(0, 0, debugCanvas.width, debugCanvas.height);
+
+  debugCtx.fillStyle = '#f0e0ff';
+  debugCtx.font = '16px Georgia, serif';
+  debugCtx.fillText(`Run frames (${RUN_FRAME_COUNT} used)`, 24, 28);
+  debugCtx.font = '13px Georgia, serif';
+  debugCtx.fillText(`X: [${RUN_DRAW_X.join(', ')}]  Y: [${RUN_DRAW_Y.join(', ')}]`, 222, 28);
+  debugCtx.fillText('Jump frames', 24, 254);
+  debugCtx.fillText('Kick frames', 424, 254);
+
+  for (let i = 0; i < 4; i++) {
+    drawDebugSpriteFrame(`run ${i}`, i, 0, 24 + i * 220, 42, 0.5, i < RUN_FRAME_COUNT);
+  }
+
+  drawDebugSpriteFrame('jump 0', 0, 1, 24, 270, 0.5);
+  drawDebugSpriteFrame('jump 1', 1, 1, 224, 270, 0.5);
+  drawDebugSpriteFrame('kick 0', 2, 1, 424, 270, 0.5);
+  drawDebugSpriteFrame('kick 1', 3, 1, 624, 270, 0.5);
 }
 
 // ─── Enemies ──────────────────────────────────────────────────────────────────
@@ -862,10 +1071,12 @@ document.addEventListener('keydown', e => {
     if (e.repeat) return;
     if (state === GameState.RUNNING) startCharge();
     else if (state === GameState.PAUSED) resume();
+    else if (state === GameState.DEBUG) resumeFromDebug();
   }
   if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
     if (state === GameState.RUNNING) pause();
     else if (state === GameState.PAUSED) resume();
+    else if (state === GameState.DEBUG) closeDebug();
   }
 });
 
@@ -880,6 +1091,9 @@ canvas.addEventListener('contextmenu',  e => e.preventDefault());
 
 startBtn.addEventListener('click',   startRun);
 pauseBtn.addEventListener('click',   pause);
+debugBtn.addEventListener('click',   openDebug);
+debugBackBtn.addEventListener('click', closeDebug);
+debugResumeBtn.addEventListener('click', resumeFromDebug);
 resumeBtn.addEventListener('click',  resume);
 restartBtn.addEventListener('click', startRun);
 

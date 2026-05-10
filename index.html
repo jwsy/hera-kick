@@ -64,7 +64,22 @@
   <!-- Paused screen -->
   <div id="paused-screen" class="screen hidden" role="dialog" aria-modal="true">
     <h2>Paused</h2>
+    <button id="debug-btn">Sprite Debug</button>
     <button id="resume-btn">Resume</button>
+  </div>
+
+  <!-- Sprite debug screen -->
+  <div id="debug-screen" class="screen hidden" role="dialog" aria-modal="true" aria-label="Sprite animation debug">
+    <div id="debug-panel">
+      <div id="debug-header">
+        <h2>Sprite Debug</h2>
+        <div id="debug-actions">
+          <button id="debug-back-btn">Back</button>
+          <button id="debug-resume-btn">Resume</button>
+        </div>
+      </div>
+      <canvas id="debug-canvas" width="920" height="520" aria-label="Hera sprite animation frames"></canvas>
+    </div>
   </div>
 
   <!-- Game over screen -->
