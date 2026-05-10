@@ -713,29 +713,40 @@ function drawHera() {
   const cx = x + HERA_W / 2;
   ctx.save();
 
-  // Charge aura — radial glow at feet, gold→electric-blue at full charge
+  // Purple aura — radiates around Hera's body when charging
   if (chargeFrac > 0) {
-    const auraR = 18 + chargeFrac * 32;
-    const auraColor = chargeFrac > 0.7 ? '#60c8ff' : '#d4a017';
-    const ag = ctx.createRadialGradient(cx, GY, 1, cx, GY, auraR);
-    ag.addColorStop(0,    '#ffffff');
-    ag.addColorStop(0.35, auraColor);
-    ag.addColorStop(1,    'rgba(0,0,0,0)');
-    ctx.globalAlpha = 0.25 + chargeFrac * 0.6;
-    ctx.fillStyle = ag;
-    ctx.beginPath(); ctx.ellipse(cx, GY, auraR, auraR * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+    const heraCY = y + HERA_H / 2;
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 80);
+    // Outer body halo
+    const outerR = 28 + chargeFrac * 24 + pulse * 8;
+    const og = ctx.createRadialGradient(cx, heraCY, 4, cx, heraCY, outerR);
+    og.addColorStop(0,    `rgba(220,100,255,${0.18 + chargeFrac * 0.22})`);
+    og.addColorStop(0.5,  `rgba(160,40,220,${0.12 + chargeFrac * 0.18})`);
+    og.addColorStop(1,    'rgba(80,0,160,0)');
+    ctx.globalAlpha = 0.7 + chargeFrac * 0.3;
+    ctx.fillStyle = og;
+    ctx.beginPath(); ctx.ellipse(cx, heraCY, outerR, outerR * 1.3, 0, 0, Math.PI * 2); ctx.fill();
+    // Inner bright core shimmer
+    const coreR = 10 + chargeFrac * 14 + pulse * 4;
+    const cg = ctx.createRadialGradient(cx, heraCY, 0, cx, heraCY, coreR);
+    cg.addColorStop(0,   `rgba(255,200,255,${0.55 + chargeFrac * 0.35})`);
+    cg.addColorStop(0.4, `rgba(200,80,255,${0.3 + chargeFrac * 0.25})`);
+    cg.addColorStop(1,   'rgba(120,0,200,0)');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.ellipse(cx, heraCY, coreR, coreR * 1.2, 0, 0, Math.PI * 2); ctx.fill();
+    // Ground pool glow
+    const poolR = 22 + chargeFrac * 18;
+    const pg = ctx.createRadialGradient(cx, GY, 0, cx, GY, poolR);
+    pg.addColorStop(0,   `rgba(180,60,255,${0.35 + chargeFrac * 0.3})`);
+    pg.addColorStop(1,   'rgba(100,0,180,0)');
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.ellipse(cx, GY, poolR, poolR * 0.3, 0, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
   }
 
   // Ground shadow (widens with charge to hint power)
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.beginPath(); ctx.ellipse(cx, GY + 4, 26 + chargeFrac * 12, 6, 0, 0, Math.PI * 2); ctx.fill();
-
-  // Crouch squish: anchor pivot at GY so feet stay planted
-  const squish = 1 - chargeFrac * 0.22;
-  ctx.translate(cx, GY);
-  ctx.scale(1, squish);
-  ctx.translate(-cx, -GY);
 
   if (heraSpriteReady) {
     const [col, row] = getSpriteFrame(anim, frame, kickTimer);
