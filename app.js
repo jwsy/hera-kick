@@ -108,7 +108,14 @@ heraImg.onload = () => {
   const id = oc2.getImageData(0, 0, SPRITE_W, SPRITE_H);
   const d  = id.data;
   for (let i = 0; i < d.length; i += 4) {
-    if (d[i] > 240 && d[i+1] > 240 && d[i+2] > 240) d[i+3] = 0;
+    const r = d[i], g = d[i+1], b = d[i+2];
+    const lo = Math.min(r, g, b);
+    if (lo > 235) {
+      d[i+3] = 0;
+    } else if (lo > 220 && r > 220 && g > 220 && b > 220) {
+      // Smoothly fade anti-aliased edge pixels so no white fringe remains
+      d[i+3] = Math.round(d[i+3] * (235 - lo) / 15);
+    }
   }
   oc2.putImageData(id, 0, 0);
   heraSpriteCanvas = oc;
@@ -534,8 +541,8 @@ function drawGround() {
 function getSpriteFrame(anim, frame, kickTimer) {
   if (anim === 'run')  return [frame % 4, 0];
   if (anim === 'jump') return [1, 1];
-  // Kick: show impact-with-sparks frame first, then follow-through
-  if (anim === 'kick') return kickTimer > 0.175 ? [3, 1] : [2, 1];
+  // Kick: pose/extension first, then impact-with-sparks
+  if (anim === 'kick') return kickTimer > 0.175 ? [2, 1] : [3, 1];
   return [0, 0];
 }
 
@@ -571,11 +578,13 @@ function drawHera() {
 
   if (heraSpriteReady) {
     const [col, row] = getSpriteFrame(anim, frame, kickTimer);
-    const sx    = col * FRAME_W;
-    const sy    = row * FRAME_H;
+    const sx = col * FRAME_W;
+    // Integer row boundaries avoid sub-pixel bleed into the white border between rows
+    const sy = Math.round(row * FRAME_H);
+    const sh = Math.round((row + 1) * FRAME_H) - sy;
     const drawX = cx - SPRITE_DRAW_W / 2;
     const drawY = y + HERA_H - SPRITE_DRAW_H;   // feet anchored to collision bottom
-    ctx.drawImage(heraSpriteCanvas, sx, sy, FRAME_W, FRAME_H, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
+    ctx.drawImage(heraSpriteCanvas, sx, sy, FRAME_W, sh, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
   } else {
     // Fallback while sprite loads
     ctx.fillStyle = '#9b1c1c';
@@ -835,6 +844,7 @@ document.addEventListener('keyup', e => {
 canvas.addEventListener('pointerdown',  e => { e.preventDefault(); startCharge(); });
 canvas.addEventListener('pointerup',    e => { e.preventDefault(); releaseJump(); });
 canvas.addEventListener('pointercancel', () => { isCharging = false; chargeT = 0; });
+canvas.addEventListener('contextmenu',  e => e.preventDefault());
 
 startBtn.addEventListener('click',   startRun);
 pauseBtn.addEventListener('click',   pause);
