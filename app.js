@@ -26,17 +26,17 @@ const HERA_W = 55;
 const HERA_H = 90;
 const HERA_X = 190;
 
-// Hera sprite sheet (sprites-init.png, 4 cols × 3 rows)
+// Hera sprite sheet (assets/sprites/hera-spritesheet.png, 4 cols × 3 rows)
 // Row 0: run frames 0-3
 // Row 1: upright run/jump (cols 0-1), high kick (cols 2-3, col 3 has sparks)
 // Row 2: guard/idle (cols 0-1), punch (cols 2-3, col 3 has sparks)
-const SPRITE_W      = 1402;
-const SPRITE_H      = 1122;
+const SPRITE_W      = 1536;
+const SPRITE_H      = 1024;
 const SPRITE_COLS   = 4;
 const SPRITE_ROWS   = 3;
-const FRAME_W       = SPRITE_W / SPRITE_COLS;   // 350.5
-const FRAME_H       = SPRITE_H / SPRITE_ROWS;   // 374
-const SPRITE_DRAW_H = 118;
+const FRAME_W       = SPRITE_W / SPRITE_COLS;   // 384
+const FRAME_H       = SPRITE_H / SPRITE_ROWS;   // 341.33
+const SPRITE_DRAW_H = 120;
 const SPRITE_DRAW_W = SPRITE_DRAW_H * (FRAME_W / FRAME_H);
 
 const GameState = {
@@ -114,7 +114,7 @@ heraImg.onload = () => {
   heraSpriteCanvas = oc;
   heraSpriteReady  = true;
 };
-heraImg.src = 'sprites-init.png';
+heraImg.src = 'assets/sprites/hera-spritesheet.png';
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
 
