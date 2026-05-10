@@ -1,0 +1,291 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --purple-deep:  #0d0020;
+  --purple-mid:   #2d0057;
+  --purple-light: #4a0080;
+  --gold:         #d4a017;
+  --gold-bright:  #f0c040;
+  --teal:         #008080;
+  --burgundy:     #800020;
+  --text:         #f0e0ff;
+  --hud-h:        48px;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--purple-deep);
+  font-family: Georgia, 'Times New Roman', serif;
+  color: var(--text);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── HUD ────────────────────────────────────────────────────────────────── */
+
+#hud {
+  flex-shrink: 0;
+  height: var(--hud-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: rgba(13, 0, 32, 0.85);
+  border-bottom: 2px solid var(--gold);
+  z-index: 10;
+}
+
+#hud.hidden { display: none; }
+
+#score-display {
+  font-size: clamp(13px, 2vw, 18px);
+  color: var(--gold);
+  font-weight: bold;
+  min-width: 90px;
+  white-space: nowrap;
+}
+
+#stamina-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 80px;
+}
+
+#stamina-bar {
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--gold);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+#stamina-fill {
+  height: 100%;
+  width: 80%;
+  background: var(--gold-bright);
+  border-radius: 5px;
+  transition: width 0.15s linear, background 0.3s;
+}
+
+#stamina-label {
+  font-size: 9px;
+  color: var(--gold);
+  opacity: 0.75;
+}
+
+#factor-display {
+  font-size: clamp(11px, 1.6vw, 15px);
+  color: var(--teal);
+  white-space: nowrap;
+}
+
+#sound-btn, #pause-btn {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 3px 9px;
+  border-radius: 5px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+#sound-btn:hover, #pause-btn:hover {
+  background: rgba(212, 160, 23, 0.2);
+}
+
+/* ── Canvas ─────────────────────────────────────────────────────────────── */
+
+#canvas-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#game-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ── Screens ─────────────────────────────────────────────────────────────── */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background: rgba(13, 0, 32, 0.9);
+  z-index: 20;
+}
+
+.screen.hidden { display: none; }
+
+h1 {
+  font-size: clamp(30px, 7vw, 64px);
+  color: var(--gold);
+  text-shadow: 0 0 24px rgba(212, 160, 23, 0.6);
+  letter-spacing: 5px;
+}
+
+h2 {
+  font-size: clamp(22px, 4vw, 42px);
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+#start-btn, #resume-btn, #restart-btn {
+  padding: 12px 36px;
+  font-size: clamp(15px, 2.5vw, 22px);
+  font-family: inherit;
+  background: linear-gradient(145deg, var(--burgundy), #5a0010);
+  color: var(--gold);
+  border: 2px solid var(--gold);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+  min-width: 160px;
+}
+
+#start-btn:hover, #resume-btn:hover, #restart-btn:hover {
+  background: linear-gradient(145deg, #a02030, var(--burgundy));
+  box-shadow: 0 0 18px rgba(212, 160, 23, 0.45);
+}
+
+button:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
+/* ── Factor picker ───────────────────────────────────────────────────────── */
+
+#factor-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(14px, 2.2vw, 20px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#factor-picker input {
+  width: 62px;
+  padding: 6px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid var(--gold);
+  color: var(--gold);
+  font-size: inherit;
+  font-family: inherit;
+  border-radius: 5px;
+}
+
+#best-score-start {
+  color: var(--teal);
+  font-size: clamp(13px, 2vw, 18px);
+  min-height: 1.4em;
+}
+
+/* ── Question overlay ────────────────────────────────────────────────────── */
+
+#question-text {
+  font-size: clamp(26px, 5.5vw, 56px);
+  color: var(--gold);
+  font-weight: bold;
+  text-shadow: 0 0 14px rgba(212, 160, 23, 0.5);
+}
+
+#answer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  width: min(90vw, 460px);
+}
+
+.answer-btn {
+  padding: 16px 10px;
+  font-size: clamp(20px, 4vw, 36px);
+  font-family: inherit;
+  background: rgba(45, 0, 87, 0.85);
+  color: var(--text);
+  border: 2px solid var(--purple-light);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  min-height: 70px;
+}
+
+.answer-btn:hover:not(:disabled) {
+  background: rgba(74, 0, 128, 0.95);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.answer-btn.correct {
+  background: #1a5c1a;
+  border-color: #4caf50;
+  color: #90ff90;
+}
+
+.answer-btn.wrong {
+  background: #5c1a1a;
+  border-color: #f44336;
+  color: #ff9090;
+}
+
+.answer-btn:disabled { cursor: default; }
+
+/* ── Game over ───────────────────────────────────────────────────────────── */
+
+#final-score, #best-score-over {
+  font-size: clamp(16px, 2.8vw, 28px);
+  color: var(--text);
+}
+
+/* ── Rotate overlay ──────────────────────────────────────────────────────── */
+
+#rotate-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--purple-deep);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  z-index: 100;
+}
+
+#rotate-overlay.hidden { display: none; }
+
+.rotate-icon {
+  font-size: 72px;
+  color: var(--gold);
+  animation: rot 2s linear infinite;
+}
+
+@keyframes rot { to { transform: rotate(360deg); } }
+
+#rotate-overlay p {
+  color: var(--text);
+  font-size: clamp(16px, 3vw, 22px);
+  text-align: center;
+  padding: 0 20px;
+}

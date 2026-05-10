@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2d0057">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Hera Runner</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Portrait rotate prompt -->
+  <div id="rotate-overlay" role="alert" aria-live="polite">
+    <div class="rotate-icon" aria-hidden="true">⟳</div>
+    <p>Rotate your device to landscape to play</p>
+  </div>
+
+  <!-- HUD (hidden when not in a run) -->
+  <div id="hud" class="hidden" role="status" aria-label="Game status">
+    <div id="score-display">Score: <span id="score-value">0</span></div>
+    <div id="stamina-container" aria-label="Stamina">
+      <div id="stamina-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80">
+        <div id="stamina-fill"></div>
+      </div>
+      <span id="stamina-label">Stamina</span>
+    </div>
+    <div id="factor-display">×<span id="factor-range">5–9</span></div>
+    <button id="sound-btn" aria-label="Toggle sound">♪</button>
+    <button id="pause-btn" aria-label="Pause game">⏸</button>
+  </div>
+
+  <!-- Canvas wrapper -->
+  <div id="canvas-wrapper">
+    <canvas id="game-canvas" aria-label="Hera Runner game canvas"></canvas>
+  </div>
+
+  <!-- Start screen -->
+  <div id="start-screen" class="screen" role="main">
+    <h1>Hera Runner</h1>
+    <div id="factor-picker">
+      <label for="min-factor">Factors:</label>
+      <input type="number" id="min-factor" min="2" max="12" value="5" aria-label="Minimum factor">
+      <span aria-hidden="true">–</span>
+      <input type="number" id="max-factor" min="2" max="12" value="9" aria-label="Maximum factor">
+    </div>
+    <div id="best-score-start" aria-live="polite"></div>
+    <button id="start-btn">Start Run</button>
+  </div>
+
+  <!-- Question overlay -->
+  <div id="question-overlay" class="screen hidden" role="dialog" aria-modal="true" aria-label="Multiplication question">
+    <div id="question-text" aria-live="assertive"></div>
+    <div id="answer-grid">
+      <button class="answer-btn" data-idx="0" aria-label="Answer 1"></button>
+      <button class="answer-btn" data-idx="1" aria-label="Answer 2"></button>
+      <button class="answer-btn" data-idx="2" aria-label="Answer 3"></button>
+      <button class="answer-btn" data-idx="3" aria-label="Answer 4"></button>
+    </div>
+  </div>
+
+  <!-- Paused screen -->
+  <div id="paused-screen" class="screen hidden" role="dialog" aria-modal="true">
+    <h2>Paused</h2>
+    <button id="resume-btn">Resume</button>
+  </div>
+
+  <!-- Game over screen -->
+  <div id="gameover-screen" class="screen hidden" role="main">
+    <h2>Run Over</h2>
+    <div id="final-score" aria-live="polite"></div>
+    <div id="best-score-over" aria-live="polite"></div>
+    <button id="restart-btn">Run Again</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
