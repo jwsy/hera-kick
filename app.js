@@ -49,6 +49,7 @@ const GameState = {
   QUESTION:     'QUESTION',
   PAUSED:       'PAUSED',
   DEBUG:        'DEBUG',
+  BESTIARY:     'BESTIARY',
   GAME_OVER:    'GAME_OVER',
 };
 
@@ -287,11 +288,12 @@ const pauseBtn = document.getElementById('pause-btn');
 
 const startScreen   = document.getElementById('start-screen');
 const qOverlay      = document.getElementById('question-overlay');
-const pausedScreen  = document.getElementById('paused-screen');
-const debugScreen   = document.getElementById('debug-screen');
-const debugCanvas   = document.getElementById('debug-canvas');
-const debugCtx      = debugCanvas.getContext('2d');
-const overScreen    = document.getElementById('gameover-screen');
+const pausedScreen   = document.getElementById('paused-screen');
+const debugScreen    = document.getElementById('debug-screen');
+const debugCanvas    = document.getElementById('debug-canvas');
+const debugCtx       = debugCanvas.getContext('2d');
+const bestiaryScreen = document.getElementById('bestiary-screen');
+const overScreen     = document.getElementById('gameover-screen');
 const rotateOverlay = document.getElementById('rotate-overlay');
 
 const minInput    = document.getElementById('min-factor');
@@ -305,6 +307,9 @@ const startBtn    = document.getElementById('start-btn');
 const debugBtn    = document.getElementById('debug-btn');
 const debugBackBtn = document.getElementById('debug-back-btn');
 const debugResumeBtn = document.getElementById('debug-resume-btn');
+const bestiaryBtn       = document.getElementById('bestiary-btn');
+const bestiaryBackBtn   = document.getElementById('bestiary-back-btn');
+const bestiaryResumeBtn = document.getElementById('bestiary-resume-btn');
 const resumeBtn   = document.getElementById('resume-btn');
 const restartBtn  = document.getElementById('restart-btn');
 
@@ -413,13 +418,14 @@ function genQuestion() {
 
 function setState(s) {
   state = s;
-  const running = s === GameState.RUNNING || s === GameState.QUESTION || s === GameState.PAUSED || s === GameState.DEBUG;
+  const running = s === GameState.RUNNING || s === GameState.QUESTION || s === GameState.PAUSED || s === GameState.DEBUG || s === GameState.BESTIARY;
   hudEl.classList.toggle('hidden', !running);
-  startScreen.classList.toggle('hidden', s !== GameState.START_SCREEN);
-  qOverlay.classList.toggle('hidden',    s !== GameState.QUESTION);
-  pausedScreen.classList.toggle('hidden', s !== GameState.PAUSED);
-  debugScreen.classList.toggle('hidden', s !== GameState.DEBUG);
-  overScreen.classList.toggle('hidden',  s !== GameState.GAME_OVER);
+  startScreen.classList.toggle('hidden',    s !== GameState.START_SCREEN);
+  qOverlay.classList.toggle('hidden',       s !== GameState.QUESTION);
+  pausedScreen.classList.toggle('hidden',   s !== GameState.PAUSED);
+  debugScreen.classList.toggle('hidden',    s !== GameState.DEBUG);
+  bestiaryScreen.classList.toggle('hidden', s !== GameState.BESTIARY);
+  overScreen.classList.toggle('hidden',     s !== GameState.GAME_OVER);
   if (s === GameState.DEBUG) drawSpriteDebug();
 }
 
@@ -477,6 +483,9 @@ function resume() { if (state === GameState.PAUSED)   setState(GameState.RUNNING
 function openDebug() { if (state === GameState.PAUSED) setState(GameState.DEBUG); }
 function closeDebug() { if (state === GameState.DEBUG) setState(GameState.PAUSED); }
 function resumeFromDebug() { if (state === GameState.DEBUG) setState(GameState.RUNNING); }
+function openBestiary() { if (state === GameState.PAUSED) setState(GameState.BESTIARY); }
+function closeBestiary() { if (state === GameState.BESTIARY) setState(GameState.PAUSED); }
+function resumeFromBestiary() { if (state === GameState.BESTIARY) setState(GameState.RUNNING); }
 
 function endGame() {
   if (score > bestScore) { bestScore = Math.floor(score); saveBest(); }
@@ -1105,6 +1114,9 @@ pauseBtn.addEventListener('click',   pause);
 debugBtn.addEventListener('click',   openDebug);
 debugBackBtn.addEventListener('click', closeDebug);
 debugResumeBtn.addEventListener('click', resumeFromDebug);
+bestiaryBtn.addEventListener('click',       openBestiary);
+bestiaryBackBtn.addEventListener('click',   closeBestiary);
+bestiaryResumeBtn.addEventListener('click', resumeFromBestiary);
 resumeBtn.addEventListener('click',  resume);
 restartBtn.addEventListener('click', startRun);
 
