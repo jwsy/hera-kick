@@ -103,20 +103,52 @@ heraImg.onload = () => {
   const oc = document.createElement('canvas');
   oc.width  = SPRITE_W;
   oc.height = SPRITE_H;
-  const oc2 = oc.getContext('2d');
+  const oc2 = oc.getContext('2d', { willReadFrequently: true });
   oc2.drawImage(heraImg, 0, 0);
   const id = oc2.getImageData(0, 0, SPRITE_W, SPRITE_H);
   const d  = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i], g = d[i+1], b = d[i+2];
-    const lo = Math.min(r, g, b);
-    if (lo > 235) {
-      d[i+3] = 0;
-    } else if (lo > 220 && r > 220 && g > 220 && b > 220) {
-      // Smoothly fade anti-aliased edge pixels so no white fringe remains
-      d[i+3] = Math.round(d[i+3] * (235 - lo) / 15);
+
+  // Edge-seeded flood fill: mark all near-white pixels reachable from the
+  // sheet border as background. This catches the white cell background AND
+  // the gray grid lines between sprite cells (which connect to the outer edge),
+  // regardless of their exact shade.
+  const W = SPRITE_W, H = SPRITE_H;
+  const isBg = new Uint8Array(W * H);
+  const queue = new Int32Array(W * H);
+  let head = 0, tail = 0;
+
+  const push = (px) => {
+    const i4 = px << 2;
+    if (!isBg[px] && Math.min(d[i4], d[i4 + 1], d[i4 + 2]) > 190) {
+      isBg[px] = 1;
+      queue[tail++] = px;
+    }
+  };
+
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
+  for (let y = 1; y < H - 1; y++) { push(y * W); push(y * W + W - 1); }
+
+  while (head < tail) {
+    const px = queue[head++];
+    const x = px % W, y = (px / W) | 0;
+    if (x > 0)     push(px - 1);
+    if (x < W - 1) push(px + 1);
+    if (y > 0)     push(px - W);
+    if (y < H - 1) push(px + W);
+  }
+
+  for (let i = 0; i < W * H; i++) {
+    if (isBg[i]) {
+      d[i * 4 + 3] = 0;
+    } else {
+      // Fade any remaining near-white fringe not reachable from the border
+      const lo = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+      if (lo > 210) {
+        d[i * 4 + 3] = Math.round(d[i * 4 + 3] * (235 - lo) / 25);
+      }
     }
   }
+
   oc2.putImageData(id, 0, 0);
   heraSpriteCanvas = oc;
   heraSpriteReady  = true;
