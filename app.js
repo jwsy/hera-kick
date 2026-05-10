@@ -26,6 +26,19 @@ const HERA_W = 55;
 const HERA_H = 90;
 const HERA_X = 190;
 
+// Hera sprite sheet (sprites-init.png, 4 cols × 3 rows)
+// Row 0: run frames 0-3
+// Row 1: upright run/jump (cols 0-1), high kick (cols 2-3, col 3 has sparks)
+// Row 2: guard/idle (cols 0-1), punch (cols 2-3, col 3 has sparks)
+const SPRITE_W      = 1402;
+const SPRITE_H      = 1122;
+const SPRITE_COLS   = 4;
+const SPRITE_ROWS   = 3;
+const FRAME_W       = SPRITE_W / SPRITE_COLS;   // 350.5
+const FRAME_H       = SPRITE_H / SPRITE_ROWS;   // 374
+const SPRITE_DRAW_H = 118;
+const SPRITE_DRAW_W = SPRITE_DRAW_H * (FRAME_W / FRAME_H);
+
 const GameState = {
   LOADING:      'LOADING',
   START_SCREEN: 'START_SCREEN',
@@ -81,6 +94,27 @@ const hera = {
   anim: 'run',   // 'run' | 'jump' | 'kick'
   frame: 0, fTimer: 0, kickTimer: 0,
 };
+
+// Sprite sheet with white-background removed
+const heraImg = new Image();
+let heraSpriteCanvas = null;
+let heraSpriteReady  = false;
+heraImg.onload = () => {
+  const oc = document.createElement('canvas');
+  oc.width  = SPRITE_W;
+  oc.height = SPRITE_H;
+  const oc2 = oc.getContext('2d');
+  oc2.drawImage(heraImg, 0, 0);
+  const id = oc2.getImageData(0, 0, SPRITE_W, SPRITE_H);
+  const d  = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] > 240 && d[i+1] > 240 && d[i+2] > 240) d[i+3] = 0;
+  }
+  oc2.putImageData(id, 0, 0);
+  heraSpriteCanvas = oc;
+  heraSpriteReady  = true;
+};
+heraImg.src = 'sprites-init.png';
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
 
@@ -497,8 +531,16 @@ function drawGround() {
 
 // ─── Hera ─────────────────────────────────────────────────────────────────────
 
+function getSpriteFrame(anim, frame, kickTimer) {
+  if (anim === 'run')  return [frame % 4, 0];
+  if (anim === 'jump') return [1, 1];
+  // Kick: show impact-with-sparks frame first, then follow-through
+  if (anim === 'kick') return kickTimer > 0.175 ? [3, 1] : [2, 1];
+  return [0, 0];
+}
+
 function drawHera() {
-  const { x, y, anim, frame } = hera;
+  const { x, y, anim, frame, kickTimer } = hera;
   const chargeFrac = (isCharging && hera.grounded) ? clamp(chargeT / MAX_CHARGE, 0, 1) : 0;
   const cx = x + HERA_W / 2;
   ctx.save();
@@ -508,9 +550,9 @@ function drawHera() {
     const auraR = 18 + chargeFrac * 32;
     const auraColor = chargeFrac > 0.7 ? '#60c8ff' : '#d4a017';
     const ag = ctx.createRadialGradient(cx, GY, 1, cx, GY, auraR);
-    ag.addColorStop(0,   '#ffffff');
+    ag.addColorStop(0,    '#ffffff');
     ag.addColorStop(0.35, auraColor);
-    ag.addColorStop(1,   'rgba(0,0,0,0)');
+    ag.addColorStop(1,    'rgba(0,0,0,0)');
     ctx.globalAlpha = 0.25 + chargeFrac * 0.6;
     ctx.fillStyle = ag;
     ctx.beginPath(); ctx.ellipse(cx, GY, auraR, auraR * 0.38, 0, 0, Math.PI * 2); ctx.fill();
@@ -527,60 +569,20 @@ function drawHera() {
   ctx.scale(1, squish);
   ctx.translate(-cx, -GY);
 
-  const ph = frame * Math.PI / 2;   // run phase
-  const swing = anim === 'run' ? Math.sin(ph) : 0;
-
-  // Legs
-  ctx.fillStyle = '#c8906e';
-  if (anim === 'kick') {
-    // Left leg down, right leg extended forward
-    ctx.fillRect(x + 8,      y + HERA_H * 0.66, 11, HERA_H * 0.34);
-    ctx.save();
-    ctx.fillStyle = '#c8906e';
-    ctx.fillRect(x + HERA_W, y + HERA_H * 0.72, 22, 11);  // extended kick
-    ctx.restore();
+  if (heraSpriteReady) {
+    const [col, row] = getSpriteFrame(anim, frame, kickTimer);
+    const sx    = col * FRAME_W;
+    const sy    = row * FRAME_H;
+    const drawX = cx - SPRITE_DRAW_W / 2;
+    const drawY = y + HERA_H - SPRITE_DRAW_H;   // feet anchored to collision bottom
+    ctx.drawImage(heraSpriteCanvas, sx, sy, FRAME_W, FRAME_H, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
   } else {
-    const l1 = swing * 10, l2 = -swing * 10;
-    ctx.fillRect(x + 8,          y + HERA_H * 0.64 + (l1 > 0 ? 0 : l1), 11, HERA_H * 0.36 + Math.abs(l1 * 0.3));
-    ctx.fillRect(x + HERA_W - 19, y + HERA_H * 0.64 + (l2 > 0 ? 0 : l2), 11, HERA_H * 0.36 + Math.abs(l2 * 0.3));
+    // Fallback while sprite loads
+    ctx.fillStyle = '#9b1c1c';
+    ctx.fillRect(x, y, HERA_W, HERA_H);
+    ctx.fillStyle = '#d4a017';
+    ctx.fillRect(x + 3, y + HERA_H * 0.44, HERA_W - 6, 6);
   }
-
-  // Dress body (burgundy gradient)
-  const dg = ctx.createLinearGradient(x, y + HERA_H * 0.22, x + HERA_W, y + HERA_H);
-  dg.addColorStop(0, '#9b1c1c'); dg.addColorStop(1, '#6b0f0f');
-  ctx.fillStyle = dg;
-  ctx.beginPath();
-  ctx.roundRect(x + 3, y + HERA_H * 0.24, HERA_W - 6, HERA_H * 0.64, [3, 3, 9, 9]);
-  ctx.fill();
-
-  // Gold belt
-  ctx.fillStyle = '#d4a017';
-  ctx.fillRect(x + 3, y + HERA_H * 0.44, HERA_W - 6, 6);
-
-  // Arms
-  ctx.fillStyle = '#c8906e';
-  if (anim !== 'kick') {
-    ctx.fillRect(x - 7,       y + HERA_H * 0.27 + swing * 8,  9, HERA_H * 0.26);
-    ctx.fillRect(x + HERA_W - 2, y + HERA_H * 0.27 - swing * 8, 9, HERA_H * 0.26);
-  } else {
-    ctx.fillRect(x - 7,       y + HERA_H * 0.27, 9, HERA_H * 0.26);
-    ctx.fillRect(x + HERA_W - 2, y + HERA_H * 0.27, 9, HERA_H * 0.26);
-  }
-
-  // Head
-  ctx.fillStyle = '#dda070';
-  circle(cx, y + HERA_H * 0.145, HERA_H * 0.135);
-
-  // Hair
-  ctx.fillStyle = '#2c1505';
-  ctx.beginPath(); ctx.arc(cx, y + HERA_H * 0.07, HERA_H * 0.115, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx, y + HERA_H * 0.01, HERA_H * 0.08,  0, Math.PI * 2); ctx.fill();
-
-  // Gold crown
-  ctx.fillStyle = '#d4a017';
-  const crownY = y + HERA_H * 0.01 - HERA_H * 0.08;
-  ctx.fillRect(cx - 11, crownY, 22, 5);
-  for (let i = 0; i < 3; i++) ctx.fillRect(cx - 9 + i * 8, crownY - 6, 5, 7);
 
   ctx.restore();
 }
