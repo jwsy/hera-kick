@@ -4,7 +4,7 @@
   "description": "A mythic endless runner with multiplication practice",
   "display": "standalone",
   "orientation": "landscape",
-  "start_url": "/",
+  "start_url": "./",
   "theme_color": "#2d0057",
   "background_color": "#0d0020",
   "icons": [
