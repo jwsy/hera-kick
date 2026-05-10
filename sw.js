@@ -1,4 +1,4 @@
-const CACHE = 'hera-runner-v1';
+const CACHE = 'hera-runner-v7';
 // Relative paths so the SW works under any base URL (e.g. GitHub Pages /repo-name/).
 // They resolve relative to the SW's own location at install time.
 const CORE = [
