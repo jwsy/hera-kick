@@ -6,8 +6,10 @@ const CW = 960;   // logical canvas width
 const CH = 540;   // logical canvas height
 const GY = 435;   // y of the ground surface (Hera stands here)
 
-const GRAVITY      = 1400;  // px/s²
-const JUMP_VY      = -650;  // px/s upward
+const GRAVITY      = 1400;   // px/s²
+const JUMP_MIN_VY  = -580;   // instant tap
+const JUMP_MAX_VY  = -980;   // full-charge (hold MAX_CHARGE seconds)
+const MAX_CHARGE   = 0.55;   // seconds to reach full charge
 
 const MAX_STAMINA  = 100;
 const START_STAMINA = 80;
@@ -68,6 +70,10 @@ let audioCtx = null;
 let skyOff   = 0;
 let cloudOff = 0;
 let gndOff   = 0;
+
+// Charge-jump state (input layer)
+let isCharging = false;
+let chargeT    = 0;   // seconds held, capped at MAX_CHARGE
 
 const hera = {
   x: HERA_X, y: GY - HERA_H,
@@ -162,6 +168,12 @@ function sfxKick()       { tone(180,'sawtooth',0.15,0.4); tone(80,'sine',0.2,0.3
 function sfxCorrect()    { tone(523,'sine',0.15,0.35); tone(659,'sine',0.15,0.35,0.15); tone(784,'sine',0.2,0.35,0.3); }
 function sfxWrong()      { tone(220,'sawtooth',0.3,0.3); tone(175,'sawtooth',0.25,0.3,0.15); }
 function sfxStaminaLow() { tone(440,'sine',0.1,0.2); tone(380,'sine',0.1,0.2,0.15); }
+function sfxJump(frac) {
+  const base = 240 + frac * 320;
+  tone(base,        'sine', 0.1,  0.22);
+  if (frac > 0.25) tone(base * 1.5, 'sine', 0.08, 0.14, 0.06);
+  if (frac > 0.7)  tone(base * 2,   'sine', 0.06, 0.10, 0.12);
+}
 
 // ─── Canvas scaling ───────────────────────────────────────────────────────────
 
@@ -225,6 +237,7 @@ function startRun() {
   question = null;
   skyOff = 0; cloudOff = 0; gndOff = 0;
 
+  isCharging = false; chargeT = 0;
   hera.y = GY - HERA_H; hera.vy = 0; hera.grounded = true;
   hera.anim = 'run'; hera.frame = 0; hera.fTimer = 0; hera.kickTimer = 0;
 
@@ -277,7 +290,21 @@ const ETYPES = ['eagle', 'swan', 'cloud', 'bull'];
 function spawnEnemy() {
   const type = ETYPES[randInt(0, 3)];
   const w = 75, h = type === 'bull' ? 75 : 60;
-  enemies.push({ type, x: CW + 20, y: GY - h, w, h, defeated: false });
+  let y;
+  if (type === 'bull') {
+    y = GY - h;
+  } else {
+    // Three tiers for flying enemies, calibrated to jump heights:
+    //   min jump (~120px): low tier always reachable from ground
+    //   normal jump (~240px): mid tier reachable
+    //   full-charge jump (~345px): high tier reachable
+    const tier = randInt(0, 2);
+    const base = GY - h;
+    if (tier === 0)      y = base - rand(20,  90);   // low  — kickable from ground
+    else if (tier === 1) y = base - rand(105, 195);  // mid  — normal jump
+    else                 y = base - rand(210, 305);  // high — needs charge
+  }
+  enemies.push({ type, x: CW + 20, y, w, h, defeated: false });
 }
 
 function spawnPeacock() {
@@ -317,6 +344,9 @@ function update(dt) {
       hera.anim = 'run';
     }
   }
+
+  // Charge accumulates only while grounded and key/pointer is held
+  if (isCharging && hera.grounded) chargeT = Math.min(chargeT + dt, MAX_CHARGE);
 
   // Animation
   hera.fTimer += dt;
@@ -469,12 +499,33 @@ function drawGround() {
 
 function drawHera() {
   const { x, y, anim, frame } = hera;
+  const chargeFrac = (isCharging && hera.grounded) ? clamp(chargeT / MAX_CHARGE, 0, 1) : 0;
   const cx = x + HERA_W / 2;
   ctx.save();
 
-  // Ground shadow
+  // Charge aura — radial glow at feet, gold→electric-blue at full charge
+  if (chargeFrac > 0) {
+    const auraR = 18 + chargeFrac * 32;
+    const auraColor = chargeFrac > 0.7 ? '#60c8ff' : '#d4a017';
+    const ag = ctx.createRadialGradient(cx, GY, 1, cx, GY, auraR);
+    ag.addColorStop(0,   '#ffffff');
+    ag.addColorStop(0.35, auraColor);
+    ag.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.25 + chargeFrac * 0.6;
+    ctx.fillStyle = ag;
+    ctx.beginPath(); ctx.ellipse(cx, GY, auraR, auraR * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Ground shadow (widens with charge to hint power)
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath(); ctx.ellipse(cx, GY + 4, 26, 6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx, GY + 4, 26 + chargeFrac * 12, 6, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Crouch squish: anchor pivot at GY so feet stay planted
+  const squish = 1 - chargeFrac * 0.22;
+  ctx.translate(cx, GY);
+  ctx.scale(1, squish);
+  ctx.translate(-cx, -GY);
 
   const ph = frame * Math.PI / 2;   // run phase
   const swing = anim === 'run' ? Math.sin(ph) : 0;
@@ -744,15 +795,29 @@ function loop(ts) {
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 
-function jump() {
-  if (state !== GameState.RUNNING || !hera.grounded) return;
-  hera.vy = JUMP_VY; hera.grounded = false; hera.anim = 'jump';
+function startCharge() {
+  if (state !== GameState.RUNNING || !hera.grounded || isCharging) return;
+  isCharging = true;
+  chargeT = 0;
+}
+
+function releaseJump() {
+  if (!isCharging) return;
+  isCharging = false;
+  if (state !== GameState.RUNNING || !hera.grounded) { chargeT = 0; return; }
+  const frac = clamp(chargeT / MAX_CHARGE, 0, 1);
+  hera.vy = JUMP_MIN_VY + (JUMP_MAX_VY - JUMP_MIN_VY) * frac;
+  hera.grounded = false;
+  hera.anim = 'jump';
+  sfxJump(frac);
+  chargeT = 0;
 }
 
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault();
-    if (state === GameState.RUNNING) jump();
+    if (e.repeat) return;
+    if (state === GameState.RUNNING) startCharge();
     else if (state === GameState.PAUSED) resume();
   }
   if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
@@ -761,7 +826,13 @@ document.addEventListener('keydown', e => {
   }
 });
 
-canvas.addEventListener('pointerdown', e => { e.preventDefault(); jump(); });
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space' || e.key === ' ') releaseJump();
+});
+
+canvas.addEventListener('pointerdown',  e => { e.preventDefault(); startCharge(); });
+canvas.addEventListener('pointerup',    e => { e.preventDefault(); releaseJump(); });
+canvas.addEventListener('pointercancel', () => { isCharging = false; chargeT = 0; });
 
 startBtn.addEventListener('click',   startRun);
 pauseBtn.addEventListener('click',   pause);
