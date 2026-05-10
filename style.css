@@ -153,7 +153,7 @@ h2 {
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 
-#start-btn, #resume-btn, #restart-btn, #debug-btn, #debug-back-btn, #debug-resume-btn {
+#start-btn, #resume-btn, #restart-btn, #debug-btn, #debug-back-btn, #debug-resume-btn, #bestiary-btn, #bestiary-back-btn, #bestiary-resume-btn {
   padding: 12px 36px;
   font-size: clamp(15px, 2.5vw, 22px);
   font-family: inherit;
@@ -166,7 +166,7 @@ h2 {
   min-width: 160px;
 }
 
-#start-btn:hover, #resume-btn:hover, #restart-btn:hover, #debug-btn:hover, #debug-back-btn:hover, #debug-resume-btn:hover {
+#start-btn:hover, #resume-btn:hover, #restart-btn:hover, #debug-btn:hover, #debug-back-btn:hover, #debug-resume-btn:hover, #bestiary-btn:hover, #bestiary-back-btn:hover, #bestiary-resume-btn:hover {
   background: linear-gradient(145deg, #a02030, var(--burgundy));
   box-shadow: 0 0 18px rgba(212, 160, 23, 0.45);
 }
@@ -296,6 +296,79 @@ button:focus-visible {
   background: #120025;
   border: 2px solid var(--gold);
   border-radius: 8px;
+}
+
+/* ── Zeus disguises bestiary ─────────────────────────────────────────────── */
+
+#bestiary-screen {
+  justify-content: flex-start;
+  padding: 24px;
+  overflow: auto;
+}
+
+#bestiary-panel {
+  width: min(100%, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#bestiary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+#bestiary-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#bestiary-back-btn, #bestiary-resume-btn {
+  min-width: 120px;
+  padding: 9px 18px;
+  font-size: 16px;
+}
+
+#bestiary-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bestiary-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  background: rgba(45, 0, 87, 0.6);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.bestiary-icon {
+  font-size: clamp(32px, 5vw, 48px);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.bestiary-name {
+  font-size: clamp(15px, 2.4vw, 20px);
+  color: var(--gold-bright);
+  font-weight: bold;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.bestiary-myth {
+  font-size: clamp(12px, 1.8vw, 15px);
+  color: var(--text);
+  line-height: 1.55;
+  opacity: 0.9;
 }
 
 /* ── Game over ───────────────────────────────────────────────────────────── */
