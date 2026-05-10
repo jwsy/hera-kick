@@ -19,6 +19,9 @@ html, body {
   background: var(--purple-deep);
   font-family: Georgia, 'Times New Roman', serif;
   color: var(--text);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 body {
@@ -118,6 +121,7 @@ body {
   max-height: 100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  touch-action: none;
 }
 
 /* ── Screens ─────────────────────────────────────────────────────────────── */

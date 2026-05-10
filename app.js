@@ -534,8 +534,8 @@ function drawGround() {
 function getSpriteFrame(anim, frame, kickTimer) {
   if (anim === 'run')  return [frame % 4, 0];
   if (anim === 'jump') return [1, 1];
-  // Kick: show impact-with-sparks frame first, then follow-through
-  if (anim === 'kick') return kickTimer > 0.175 ? [3, 1] : [2, 1];
+  // Kick: pose/extension first, then impact-with-sparks
+  if (anim === 'kick') return kickTimer > 0.175 ? [2, 1] : [3, 1];
   return [0, 0];
 }
 
@@ -835,6 +835,7 @@ document.addEventListener('keyup', e => {
 canvas.addEventListener('pointerdown',  e => { e.preventDefault(); startCharge(); });
 canvas.addEventListener('pointerup',    e => { e.preventDefault(); releaseJump(); });
 canvas.addEventListener('pointercancel', () => { isCharging = false; chargeT = 0; });
+canvas.addEventListener('contextmenu',  e => e.preventDefault());
 
 startBtn.addEventListener('click',   startRun);
 pauseBtn.addEventListener('click',   pause);
