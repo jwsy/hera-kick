@@ -63,7 +63,7 @@ Render order: sky background → parallax clouds/columns → ground → peacocks
 
 ### Enemies
 
-The four Zeus disguises are drawn procedurally in canvas (`drawEagle`, `drawSwan`, `drawZeusCloud`, `drawBull`), styled after the reference art: white eagle, white swan, angry silver storm cloud with flickering lightning, cream bull with golden horns. They animate off the module-level `animT` clock (accumulated in `update()`, so animation freezes on pause) plus a per-enemy random `phase` set at spawn.
+The four Zeus disguises use the actual pixel art from `sprites-init.png`, extracted into `assets/sprites/enemies-sheet.png` (frame boxes in the `ENEMY_FRAMES` constant). In the reference sheet each enemy is partly covered by the kick-impact spark and Hera's leg; the extraction (hand-traced occlusion polygons, clone-stamp texture repair) removes those. Sprites are pre-scaled to game size and blitted 1:1 with `imageSmoothingEnabled = false` at integer coordinates to keep the 16-bit look crisp. Each enemy has two baked frames (base + squash variant) alternated at `ENEMY_ANIM_HZ`, driven by the module-level `animT` clock (accumulated in `update()`, so animation freezes on pause) plus a per-enemy random `phase` set at spawn; flying enemies bob, the bull bounces with its gallop, and the cloud gets extra procedural lightning crackle (`drawBolt`) on top of the bolts baked into its sprite.
 
 ### Jump System
 

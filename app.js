@@ -42,6 +42,22 @@ const HERA_FRAMES = {
 const HERA_SCALE = 0.55;   // sheet px -> screen px (~122px standing height)
 const RUN_LEAN   = 0.06;   // forward lean while running (radians)
 
+// Zeus-disguise enemy sprites (assets/sprites/enemies-sheet.png) — the
+// actual pixel art cut from the reference sheet, pre-scaled to game size so
+// frames blit 1:1 with crisp pixels. Each disguise has two frames: the base
+// pose and a squashed variant (wing-beat / puff-breath / gallop-compress).
+const ENEMY_FRAMES = {
+  eagle0: { x: 2,   y: 8,  w: 67, h: 78 },
+  eagle1: { x: 71,  y: 8,  w: 67, h: 78 },
+  swan0:  { x: 140, y: 14, w: 57, h: 72 },
+  swan1:  { x: 199, y: 14, w: 57, h: 72 },
+  cloud0: { x: 258, y: 6,  w: 86, h: 80 },
+  cloud1: { x: 346, y: 6,  w: 86, h: 80 },
+  bull0:  { x: 434, y: 2,  w: 67, h: 84 },
+  bull1:  { x: 503, y: 2,  w: 67, h: 84 },
+};
+const ENEMY_ANIM_HZ = { eagle: 6, swan: 4, cloud: 2.5, bull: 9 };
+
 const GameState = {
   LOADING:      'LOADING',
   START_SCREEN: 'START_SCREEN',
@@ -102,11 +118,16 @@ const hera = {
   frame: 0, runPhase: 0, kickTimer: 0,
 };
 
-// Sprite sheet ships with a transparent background — no cleanup needed.
+// Sprite sheets ship with transparent backgrounds — no cleanup needed.
 const heraImg = new Image();
 let heraSpriteReady = false;
 heraImg.onload = () => { heraSpriteReady = true; };
 heraImg.src = 'assets/sprites/hera-sheet.png';
+
+const enemiesImg = new Image();
+let enemySpriteReady = false;
+enemiesImg.onload = () => { enemySpriteReady = true; };
+enemiesImg.src = 'assets/sprites/enemies-sheet.png';
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
 
@@ -687,11 +708,11 @@ function drawSpriteDebug() {
 }
 
 // ─── Enemies ──────────────────────────────────────────────────────────────────
-// Zeus's disguises, styled after the reference art (sprites-init.png):
-// white eagle, white swan, angry silver storm cloud, cream bull with gold
-// horns. All animate off `animT` with a per-enemy phase so they desync.
-
-const OUTLINE = 'rgba(43, 34, 64, 0.9)';
+// Zeus's disguises, blitted straight from the reference pixel art. Each
+// enemy alternates its two baked frames (wing-beat / puff-breath / gallop)
+// off the `animT` clock with a per-enemy phase so they desync, plus a small
+// draw-only bob (flying) or ground bounce (bull). The cloud gets extra
+// procedural lightning crackle on top of the bolts baked into its sprite.
 
 function drawBolt(x, y, s, color, alpha) {
   ctx.save();
@@ -705,263 +726,38 @@ function drawBolt(x, y, s, color, alpha) {
   ctx.restore();
 }
 
-function drawEagle(e) {
-  const t   = animT * 9 + e.phase;
-  const flap = Math.sin(t);
-  const bob  = Math.sin(animT * 2.8 + e.phase) * 3;
-  ctx.save();
-  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 + bob);
-  ctx.lineJoin = 'round';
+function drawEnemy(e) {
+  if (!enemySpriteReady) return;
+  const t = animT * ENEMY_ANIM_HZ[e.type] + e.phase;
+  const f = ENEMY_FRAMES[e.type + (Math.floor(t) % 2)];
 
-  // Wings — raised feather fans beating at the shoulder
-  for (const side of [-1, 1]) {
-    ctx.save();
-    ctx.translate(side * 8, -4);
-    ctx.rotate(side * flap * 0.28);
-    ctx.strokeStyle = side < 0 ? '#d8d2c2' : '#f4f0e2';
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 4; i++) {
-      const a = 0.3 + i * 0.3;
-      const len = 26 - i * 2.5;
-      ctx.lineWidth = 7 - i;
-      ctx.beginPath();
-      ctx.moveTo(0, 2);
-      ctx.lineTo(side * Math.sin(a) * len, -Math.cos(a) * len);
-      ctx.stroke();
+  let dx = e.x + e.w / 2 - f.w / 2;
+  let dy;
+  if (e.type === 'bull') {
+    dy = e.y + e.h - f.h - Math.abs(Math.sin(t * Math.PI)) * 2.5;
+  } else {
+    dy = e.y + e.h / 2 - f.h / 2 + Math.sin(animT * 2.6 + e.phase) * 3;
+  }
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(enemiesImg, f.x, f.y, f.w, f.h, Math.round(dx), Math.round(dy), f.w, f.h);
+  ctx.restore();
+
+  if (e.type === 'cloud') {
+    const cx0 = e.x + e.w / 2, cy0 = e.y + e.h / 2;
+    const f1 = Math.sin(animT * 13 + e.phase * 3);
+    if (f1 > 0.2) drawBolt(cx0 + 48, cy0 - 6, 1.2, '#ffd700', Math.min(1, f1 * 1.4));
+    const f2 = Math.sin(animT * 11 + e.phase * 5 + 2);
+    if (f2 > 0.4) drawBolt(cx0 - 46, cy0 + 14, 1.0, '#9be8ff', Math.min(1, f2 * 1.3));
+    ctx.fillStyle = '#ffd700';
+    const sparks = [[-40, -22], [42, 16], [-8, -34]];
+    for (let i = 0; i < sparks.length; i++) {
+      ctx.globalAlpha = (0.5 + 0.5 * Math.sin(animT * 9 + i * 2.1 + e.phase)) * 0.9;
+      circle(cx0 + sparks[i][0], cy0 + sparks[i][1], 1.6);
     }
-    ctx.restore();
+    ctx.globalAlpha = 1;
   }
-
-  // Tail feathers trailing behind
-  ctx.fillStyle = '#e8e2d0';
-  ctx.beginPath();
-  ctx.moveTo(14, 4); ctx.lineTo(30, 0); ctx.lineTo(28, 6);
-  ctx.lineTo(31, 8); ctx.lineTo(26, 12); ctx.lineTo(14, 12);
-  ctx.closePath(); ctx.fill();
-
-  // Body with breast-feather scallops
-  ctx.fillStyle = '#f4f0e2';
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(2, 8, 17, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = 'rgba(180,170,150,0.7)'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(-2, 7, 5, 0.2, Math.PI - 0.2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(6, 11, 5, 0.2, Math.PI - 0.2); ctx.stroke();
-
-  // Head — white, glaring at Hera
-  ctx.fillStyle = '#faf7ec';
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(-14, -6, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
-  // Big hooked golden beak
-  ctx.fillStyle = '#e8a825';
-  ctx.beginPath();
-  ctx.moveTo(-22, -11);
-  ctx.quadraticCurveTo(-36, -10, -33, -2);
-  ctx.quadraticCurveTo(-31, 2, -27, -1);
-  ctx.quadraticCurveTo(-26, 1, -21, 0);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.5; ctx.stroke();
-
-  // Angry brow and eye
-  ctx.strokeStyle = '#3a3050'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(-21, -13); ctx.lineTo(-13, -10); ctx.stroke();
-  ctx.fillStyle = '#2b2240'; circle(-17, -8, 2.2);
-
-  // Talons tucking with the wingbeat
-  ctx.strokeStyle = '#e0a020'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(-4, 19); ctx.lineTo(-6, 25 + flap * 1.5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(4, 20);  ctx.lineTo(3, 26 - flap * 1.5);  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawSwan(e) {
-  const bob  = Math.sin(animT * 2.4 + e.phase) * 3;
-  const flap = Math.sin(animT * 6 + e.phase);
-  const nod  = Math.sin(animT * 2.4 + e.phase + 0.8) * 1.5;
-  ctx.save();
-  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 + bob);
-
-  // Body
-  ctx.fillStyle = '#f2f0f8';
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(4, 8, 22, 12, -0.08, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
-  // Upturned tail
-  ctx.fillStyle = '#f2f0f8';
-  ctx.beginPath();
-  ctx.moveTo(22, 2); ctx.quadraticCurveTo(32, -4, 34, -10);
-  ctx.quadraticCurveTo(28, 0, 20, 8);
-  ctx.closePath(); ctx.fill();
-
-  // Layered wing, gently beating
-  ctx.save();
-  ctx.translate(6, 2);
-  ctx.rotate(flap * 0.18 - 0.05);
-  ctx.fillStyle = '#dcd8ec';
-  ctx.beginPath(); ctx.ellipse(6, 2, 16, 8, -0.35, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#efedf8';
-  ctx.beginPath(); ctx.ellipse(2, -1, 13, 6.5, -0.3, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = 'rgba(150,145,180,0.8)'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(6 + i * 3, 8 - i * 4);
-    ctx.lineTo(18 + i * 3, 4 - i * 4);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Tall S-curved neck with a slow nod, shaded so it reads against the body
-  ctx.strokeStyle = '#dcd8ec'; ctx.lineWidth = 9.5; ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(-8, 6);
-  ctx.bezierCurveTo(-16, -2, -24, -8, -22, -23 + nod);
-  ctx.stroke();
-  ctx.strokeStyle = '#f6f4fb'; ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.moveTo(-8, 5);
-  ctx.bezierCurveTo(-16, -3, -24, -9, -22, -23 + nod);
-  ctx.stroke();
-
-  // Head raised high: black mask, orange beak
-  ctx.fillStyle = '#f6f4fb';
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(-22, -25 + nod, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#2b2240';
-  ctx.beginPath(); ctx.ellipse(-26, -26 + nod, 4.5, 3, 0.2, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#e8963c';
-  ctx.beginPath();
-  ctx.moveTo(-28, -29 + nod); ctx.lineTo(-38, -24 + nod); ctx.lineTo(-28, -22 + nod);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#fff'; circle(-26, -27 + nod, 1.4);
-
-  ctx.restore();
-}
-
-function drawZeusCloud(e) {
-  const cx0 = e.x + e.w / 2, cy0 = e.y + e.h / 2;
-  const puff = 1 + Math.sin(animT * 3 + e.phase) * 0.04;
-  ctx.save();
-  ctx.translate(cx0, cy0);
-  ctx.scale(puff, 2 - puff);   // breathe: widen while flattening
-
-  // Cumulus puffs — dark base, silver body, bright crown
-  ctx.fillStyle = '#a8a2c6';
-  for (const [px, py, r] of [[-20, 12, 12], [-2, 15, 13], [16, 12, 12], [27, 6, 9]]) circle(px, py, r);
-  ctx.fillStyle = '#c7c2dd';
-  for (const [px, py, r] of [[-24, -2, 13], [-8, -10, 15], [10, -8, 14], [24, -2, 11], [0, 4, 16], [18, 4, 12]]) circle(px, py, r);
-  ctx.fillStyle = '#e5e1f1';
-  for (const [px, py, r] of [[-12, -12, 8], [6, -13, 8], [-26, -6, 6]]) circle(px, py, r);
-
-  // Furious golden eyes under heavy brows, and a thundering frown
-  ctx.fillStyle = '#f2b52a';
-  ctx.beginPath(); ctx.ellipse(-8, -2, 4.5, 3.5, 0.15, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(8, -2, 4.5, 3.5, -0.15, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#2b2240'; circle(-7, -2, 1.8); circle(7, -2, 1.8);
-  ctx.strokeStyle = '#4a4066'; ctx.lineCap = 'round';
-  ctx.lineWidth = 3.5;
-  ctx.beginPath(); ctx.moveTo(-14, -9); ctx.lineTo(-3, -5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(14, -9);  ctx.lineTo(3, -5);  ctx.stroke();
-  ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.arc(0, 14, 6, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
-
-  ctx.restore();
-
-  // Crackling lightning, flickering out of sync
-  const f1 = Math.sin(animT * 13 + e.phase * 3);
-  if (f1 > 0.1) drawBolt(cx0 + 34, cy0 - 8, 1.4, '#ffd700', Math.min(1, f1 * 1.5));
-  const f2 = Math.sin(animT * 11 + e.phase * 5 + 2);
-  if (f2 > 0.3) drawBolt(cx0 - 30, cy0 + 16, 1.1, '#9be8ff', Math.min(1, f2 * 1.4));
-  const f3 = Math.sin(animT * 17 + e.phase * 7 + 4);
-  if (f3 > 0.55) drawBolt(cx0 + 14, cy0 + 24, 0.8, '#9be8ff', Math.min(1, f3));
-
-  // Twinkling gold sparks
-  ctx.fillStyle = '#ffd700';
-  const sparks = [[-32, -16], [30, 8], [-6, -24]];
-  for (let i = 0; i < sparks.length; i++) {
-    const a = 0.5 + 0.5 * Math.sin(animT * 9 + i * 2.1 + e.phase);
-    ctx.globalAlpha = a * 0.9;
-    circle(cx0 + sparks[i][0], cy0 + sparks[i][1], 1.6);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawBull(e) {
-  const g = animT * 12 + e.phase;
-  const bounce = Math.abs(Math.sin(g)) * 2.5;
-  ctx.save();
-  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 - bounce);
-  ctx.lineJoin = 'round';
-
-  const BODY = '#ecdcae', SHADE = '#d2bc84', DARK = '#3f3350';
-
-  // Flicking tail
-  const tw = Math.sin(g * 0.5) * 4;
-  ctx.strokeStyle = SHADE; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(26, -2); ctx.quadraticCurveTo(36, 2 + tw, 34, 12 + tw); ctx.stroke();
-  ctx.fillStyle = '#8a6a3a'; circle(34, 13 + tw, 3);
-
-  // Galloping legs (uneven phases for a gallop, not a trot)
-  const legPhase = [0, 2.4, 1.1, 3.5];
-  const legX = [-18, -8, 12, 22];
-  for (let i = 0; i < 4; i++) {
-    ctx.save();
-    ctx.translate(legX[i], 12);
-    ctx.rotate(Math.sin(g + legPhase[i]) * 0.55);
-    ctx.fillStyle = i % 2 === 0 ? SHADE : BODY;
-    ctx.fillRect(-3.5, 0, 7, 18);
-    ctx.fillStyle = '#6b4a2a';
-    ctx.fillRect(-3.5, 15, 7, 5);
-    if (i === 1) {   // gold band, as in the art
-      ctx.fillStyle = '#d4a017';
-      ctx.fillRect(-4, 8, 8, 4);
-    }
-    ctx.restore();
-  }
-
-  // Massive cream body with a muscled shoulder hump
-  ctx.fillStyle = BODY;
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(2, 0, 28, 19, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#f6ecd0';
-  ctx.beginPath(); ctx.ellipse(-8, -10, 14, 8, -0.2, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = SHADE;
-  ctx.beginPath(); ctx.ellipse(8, 10, 16, 7, 0.1, 0, Math.PI * 2); ctx.fill();
-
-  // Lowered head, swinging with the gallop
-  ctx.save();
-  ctx.translate(-22, -4 + Math.sin(g) * 1.2);
-
-  // Ear behind the horns
-  ctx.fillStyle = SHADE;
-  ctx.beginPath(); ctx.ellipse(9, -9, 5, 3, 0.5, 0, Math.PI * 2); ctx.fill();
-
-  // Great golden horns sweeping up like a lyre
-  ctx.lineCap = 'round';
-  ctx.lineWidth = 5; ctx.strokeStyle = '#c99a20';
-  ctx.beginPath(); ctx.moveTo(8, -7); ctx.quadraticCurveTo(18, -14, 14, -26); ctx.stroke();
-  ctx.lineWidth = 6; ctx.strokeStyle = '#e8b62e';
-  ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(-16, -16, -12, -28); ctx.stroke();
-  ctx.lineWidth = 2; ctx.strokeStyle = '#f8dc7a';
-  ctx.beginPath(); ctx.moveTo(-8, -11); ctx.quadraticCurveTo(-14, -17, -12, -25); ctx.stroke();
-
-  // Head, muzzle, nostrils
-  ctx.fillStyle = BODY;
-  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(0, 0, 12, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#d9bd94';
-  ctx.beginPath(); ctx.ellipse(-5, 6, 9, 6.5, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = DARK; circle(-9, 5, 1.6); circle(-4, 7, 1.6);
-
-  // Angry golden eye
-  ctx.fillStyle = '#f2b52a';
-  ctx.beginPath(); ctx.ellipse(-5, -4, 3.5, 2.6, 0.1, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = DARK; circle(-6, -4, 1.4);
-  ctx.strokeStyle = DARK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(-11, -9); ctx.lineTo(-2, -7); ctx.stroke();
-
-  ctx.restore();
-  ctx.restore();
 }
 
 // ─── Peacock ──────────────────────────────────────────────────────────────────
@@ -1043,12 +839,7 @@ function render() {
 
   for (const p of peacocks) drawPeacock(p);
 
-  for (const e of enemies) {
-    if      (e.type === 'eagle') drawEagle(e);
-    else if (e.type === 'swan')  drawSwan(e);
-    else if (e.type === 'cloud') drawZeusCloud(e);
-    else                         drawBull(e);
-  }
+  for (const e of enemies) drawEnemy(e);
 
   drawHera();
 
