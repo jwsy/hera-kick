@@ -29,18 +29,26 @@ const HERA_X = 190;
 // Hera sprite sheet (assets/sprites/hera-sheet.png) — frames cut from the
 // "Hera, Queen of the Gods" reference art (sprites-init.png). Transparent
 // background, feet resting on the bottom edge of each frame box.
-// ax = x (in sheet px) of the planted foot inside the frame; every frame is
-// drawn with that foot pinned to Hera's ground point so the animation
-// doesn't slide. The kick frame has the impact spark baked in at the foot.
+// The run cycle is contact/airborne pairs: walk frames are the stride
+// contacts, pass frames are the same poses with the hem/feet band squashed
+// (legs tucked, airborne). Run-frame anchors (ax) sit on the head/torso
+// centroid so her body stays rock steady between frames — anchoring by the
+// feet is what made the old animation twitch. Idle/kick anchor by the
+// planted foot. The kick frame has the impact spark baked in.
 const HERA_FRAMES = {
-  idle0: { x: 2,   y: 7, w: 160, h: 221, ax: 70 },
-  idle1: { x: 164, y: 8, w: 162, h: 220, ax: 84 },
-  walk0: { x: 328, y: 6, w: 153, h: 222, ax: 93 },
-  walk1: { x: 483, y: 7, w: 166, h: 221, ax: 102 },
-  kick:  { x: 651, y: 2, w: 318, h: 226, ax: 139 },
+  idle0: { x: 2,   y: 7,  w: 160, h: 221, ax: 70 },
+  idle1: { x: 164, y: 8,  w: 162, h: 220, ax: 84 },
+  walk0: { x: 328, y: 6,  w: 153, h: 222, ax: 91 },
+  pass0: { x: 483, y: 15, w: 153, h: 213, ax: 91 },
+  walk1: { x: 638, y: 7,  w: 166, h: 221, ax: 98 },
+  pass1: { x: 806, y: 16, w: 166, h: 212, ax: 98 },
+  kick:  { x: 974, y: 2,  w: 318, h: 226, ax: 139 },
 };
+const RUN_CYCLE  = ['walk0', 'pass0', 'walk1', 'pass1'];
+const RUN_BASE_H = 222;    // contact-frame height; run frames top-align to it
+                           // so the shorter pass frames lift the feet, not drop the head
 const HERA_SCALE = 0.55;   // sheet px -> screen px (~122px standing height)
-const RUN_LEAN   = 0.06;   // forward lean while running (radians)
+const RUN_LEAN   = 0.09;   // forward lean while running (radians)
 
 // Zeus-disguise enemy sprites (assets/sprites/enemies-sheet.png) — the
 // actual pixel art cut from the reference sheet, pre-scaled to game size so
@@ -55,6 +63,8 @@ const ENEMY_FRAMES = {
   cloud1: { x: 346, y: 6,  w: 86, h: 80 },
   bull0:  { x: 434, y: 2,  w: 67, h: 84 },
   bull1:  { x: 503, y: 2,  w: 67, h: 84 },
+  peacock0: { x: 572, y: 16, w: 52, h: 70 },
+  peacock1: { x: 626, y: 16, w: 52, h: 70 },
 };
 const ENEMY_ANIM_HZ = { eagle: 6, swan: 4, cloud: 2.5, bull: 9 };
 
@@ -89,6 +99,7 @@ let lowPlayed   = false;   // stamina-low sound gating
 let enemies  = [];
 let peacocks = [];
 let effects  = [];
+let dusts    = [];   // footstep / landing dust puffs
 
 let animT = 0;   // world animation clock (seconds); frozen while paused
 
@@ -291,7 +302,7 @@ function startRun() {
   savePrefs();
 
   stamina = START_STAMINA; score = 0; worldSpeed = 220; elapsed = 0; lowPlayed = false;
-  enemies = []; peacocks = []; effects = [];
+  enemies = []; peacocks = []; effects = []; dusts = [];
   eTimer = 0; eInterval = rand(1.5, 3.0);
   pTimer = 0; pInterval = rand(4.0, 7.0);
   question = null;
@@ -374,7 +385,11 @@ function spawnEnemy() {
 }
 
 function spawnPeacock() {
-  peacocks.push({ x: CW + 20, y: GY - 70, w: 60, h: 70, collected: false });
+  peacocks.push({ x: CW + 20, y: GY - 70, w: 60, h: 70, collected: false, phase: rand(0, Math.PI * 2) });
+}
+
+function spawnDust(x, y) {
+  dusts.push({ x, y, t: 0, dur: rand(0.25, 0.4), r: rand(2, 3.5) });
 }
 
 function spawnEffect(x, y) {
@@ -408,6 +423,7 @@ function update(dt) {
     if (hera.y >= GY - HERA_H) {
       hera.y = GY - HERA_H; hera.vy = 0; hera.grounded = true;
       hera.anim = 'run';
+      for (let i = 0; i < 3; i++) spawnDust(hera.x + rand(-6, 16), GY - 2);
     }
   }
 
@@ -418,8 +434,12 @@ function update(dt) {
   animT += dt;
   if (hera.anim === 'run') {
     // Stride rate scales with world speed so her feet keep up with the ground
-    hera.runPhase += dt * clamp(worldSpeed / 28, 7, 12);
-    hera.frame = Math.floor(hera.runPhase) % 2;
+    hera.runPhase += dt * clamp(worldSpeed / 14, 13, 22);
+    const nf = Math.floor(hera.runPhase) % 4;
+    if (nf !== hera.frame && nf % 2 === 0 && hera.grounded) {
+      spawnDust(hera.x + rand(-2, 10), GY - 2);   // footfall kicks up dust
+    }
+    hera.frame = nf;
   }
   if (hera.anim === 'kick') {
     hera.kickTimer -= dt;
@@ -482,6 +502,14 @@ function update(dt) {
   for (let i = effects.length - 1; i >= 0; i--) {
     effects[i].t += dt;
     if (effects[i].t >= effects[i].dur) effects.splice(i, 1);
+  }
+
+  // Update dust puffs (they trail off behind her with the ground)
+  for (let i = dusts.length - 1; i >= 0; i--) {
+    const d = dusts[i];
+    d.t += dt;
+    d.x -= worldSpeed * 0.6 * dt;
+    if (d.t >= d.dur) dusts.splice(i, 1);
   }
 
   // HUD
@@ -565,16 +593,18 @@ function drawGround() {
 
 // ─── Hera ─────────────────────────────────────────────────────────────────────
 
-// Draw a sheet frame with its planted foot pinned at (footX, footY),
-// optionally rotated about that foot and squash/stretched.
-function drawHeraFrame(name, footX, footY, rot = 0, sclX = 1, sclY = 1) {
+// Draw a sheet frame anchored at (footX, footY), optionally rotated about
+// that point and squash/stretched. baseH top-aligns the frame to a taller
+// reference height: run frames pass RUN_BASE_H so the shorter airborne
+// frames lift her feet off the ground instead of dropping her head.
+function drawHeraFrame(name, footX, footY, rot = 0, sclX = 1, sclY = 1, baseH = 0) {
   const f = HERA_FRAMES[name];
   ctx.save();
   ctx.translate(footX, footY);
   if (rot) ctx.rotate(rot);
   ctx.scale(sclX, sclY);
   ctx.drawImage(heraImg, f.x, f.y, f.w, f.h,
-    -f.ax * HERA_SCALE, -f.h * HERA_SCALE, f.w * HERA_SCALE, f.h * HERA_SCALE);
+    -f.ax * HERA_SCALE, -(baseH || f.h) * HERA_SCALE, f.w * HERA_SCALE, f.h * HERA_SCALE);
   ctx.restore();
 }
 
@@ -624,15 +654,15 @@ function drawHera() {
     if (anim === 'kick') {
       drawHeraFrame('kick', cx, footY);
     } else if (anim === 'jump') {
-      // Mid-stride frame, tilting back on the way up and forward coming down
+      // Tucked-legs frame, tilting back on the way up and forward coming down
       const tilt = clamp(hera.vy * 0.00012, -0.12, 0.14);
-      drawHeraFrame('walk1', cx, footY, tilt);
+      drawHeraFrame('pass1', cx, footY, tilt);
     } else {
-      // Run: alternate the two stride frames with a bounce; crouch while charging
-      const bounce = 2.5 * Math.abs(Math.sin(hera.runPhase * Math.PI));
-      const name = hera.frame === 0 ? 'walk0' : 'walk1';
-      drawHeraFrame(name, cx, footY - bounce, RUN_LEAN,
-        1 + chargeFrac * 0.05, 1 - chargeFrac * 0.09);
+      // Run cycle: contact -> airborne -> contact -> airborne, with a small
+      // bounce per step; crouch while charging a jump
+      const bounce = 1.2 * Math.abs(Math.sin(hera.runPhase * Math.PI / 2));
+      drawHeraFrame(RUN_CYCLE[hera.frame], cx, footY - bounce, RUN_LEAN,
+        1 + chargeFrac * 0.05, 1 - chargeFrac * 0.09, RUN_BASE_H);
     }
   } else {
     // Fallback while sprite loads
@@ -696,12 +726,11 @@ function drawSpriteDebug() {
 
   debugCtx.fillStyle = '#f0e0ff';
   debugCtx.font = '16px Georgia, serif';
-  debugCtx.fillText('Run cycle (walk0 ↔ walk1, jump uses walk1)', 24, 28);
+  debugCtx.fillText('Run cycle: contact → airborne → contact → airborne (jump uses pass1)', 24, 28);
   debugCtx.fillText('Kick (spark baked in)', 324, 254);
   debugCtx.fillText('Idle (unused in run)', 24, 254);
 
-  drawDebugSpriteFrame('walk0', 'walk0', 24, 42);
-  drawDebugSpriteFrame('walk1', 'walk1', 160, 42);
+  RUN_CYCLE.forEach((name, i) => drawDebugSpriteFrame(name, name, 24 + i * 136, 42));
   drawDebugSpriteFrame('idle0', 'idle0', 24, 270, 0.7, false);
   drawDebugSpriteFrame('idle1', 'idle1', 160, 270, 0.7, false);
   drawDebugSpriteFrame('kick', 'kick', 324, 270);
@@ -761,43 +790,34 @@ function drawEnemy(e) {
 }
 
 // ─── Peacock ──────────────────────────────────────────────────────────────────
+// The collectible peacock, blitted from the same reference pixel art
+// (bottom row of sprites-init.png) with a two-frame strut and a gold glint
+// so it reads as a pickup.
 
 function drawPeacock(p) {
-  ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h);
-
-  const TEAL = '#008080';
-  // Fan
-  for (let i = 0; i < 7; i++) {
-    const a = (-60 + i * 20) * Math.PI / 180;
-    const fl = 44;
-    const fx = Math.cos(a) * fl, fy = -32 - Math.sin(a) * fl;
-    ctx.strokeStyle = i % 2 === 0 ? '#009090' : '#00b0a0';
-    ctx.lineWidth = 4; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(0, -28); ctx.lineTo(fx, fy); ctx.stroke();
-    ctx.fillStyle = '#003d55'; circle(fx, fy, 6);
-    ctx.fillStyle = '#00d0ff'; circle(fx, fy, 3.5);
-    ctx.fillStyle = '#fff'; circle(fx, fy, 1.5);
-  }
-
-  // Body
-  ctx.fillStyle = '#006060';
-  ctx.beginPath(); ctx.ellipse(0, -20, 12, 22, 0, 0, Math.PI * 2); ctx.fill();
-
-  // Head
-  ctx.fillStyle = '#00a0a0'; circle(0, -44, 8);
-  // Crest
-  ctx.fillStyle = '#00d0b0';
-  for (let i = 0; i < 3; i++) circle(-4 + i * 4, -55 - i, 3);
-  // Beak & eye
-  ctx.fillStyle = '#ffd700'; ctx.fillRect(7, -45, 9, 3);
-  ctx.fillStyle = '#111'; circle(5, -46, 2);
-
-  // Legs
-  ctx.strokeStyle = '#007050'; ctx.lineWidth = 3; ctx.lineCap = 'square';
-  ctx.beginPath(); ctx.moveTo(-5, -5); ctx.lineTo(-5, 6); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo( 5, -5); ctx.lineTo( 5, 6); ctx.stroke();
-
+  if (!enemySpriteReady) return;
+  const f = ENEMY_FRAMES['peacock' + (Math.floor(animT * 3 + p.phase) % 2)];
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(enemiesImg, f.x, f.y, f.w, f.h,
+    Math.round(p.x + p.w / 2 - f.w / 2), Math.round(p.y + p.h - f.h), f.w, f.h);
   ctx.restore();
+
+  const tw = 0.5 + 0.5 * Math.sin(animT * 6 + p.phase);
+  ctx.globalAlpha = 0.4 + tw * 0.6;
+  ctx.fillStyle = '#ffd700';
+  circle(p.x + p.w / 2 + 20, p.y + 4, 1.5 + tw * 1.5);
+  ctx.globalAlpha = 1;
+}
+
+// ─── Dust ─────────────────────────────────────────────────────────────────────
+
+function drawDust(d) {
+  const pr = d.t / d.dur;
+  ctx.globalAlpha = 0.35 * (1 - pr);
+  ctx.fillStyle = '#c9b28a';
+  circle(d.x, d.y - pr * 6, d.r + pr * 4);
+  ctx.globalAlpha = 1;
 }
 
 // ─── Kick effect ──────────────────────────────────────────────────────────────
@@ -840,6 +860,8 @@ function render() {
   for (const p of peacocks) drawPeacock(p);
 
   for (const e of enemies) drawEnemy(e);
+
+  for (const d of dusts) drawDust(d);
 
   drawHera();
 
