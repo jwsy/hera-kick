@@ -1,4 +1,4 @@
-const CACHE = 'hera-runner-v7';
+const CACHE = 'hera-runner-v8';
 // Relative paths so the SW works under any base URL (e.g. GitHub Pages /repo-name/).
 // They resolve relative to the SW's own location at install time.
 const CORE = [
@@ -9,6 +9,7 @@ const CORE = [
   './manifest.json',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
+  './assets/sprites/hera-sheet.png',
 ];
 
 self.addEventListener('install', e => {

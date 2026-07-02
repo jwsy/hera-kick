@@ -26,21 +26,21 @@ const HERA_W = 55;
 const HERA_H = 90;
 const HERA_X = 190;
 
-// Hera sprite sheet (assets/sprites/hera-spritesheet.png, 4 cols × 3 rows)
-// Row 0: run frames 0-3
-// Row 1: upright run/jump (cols 0-1), high kick (cols 2-3, col 3 has sparks)
-// Row 2: guard/idle (cols 0-1), punch (cols 2-3, col 3 has sparks)
-const SPRITE_W      = 1536;
-const SPRITE_H      = 1024;
-const SPRITE_COLS   = 4;
-const FRAME_W       = SPRITE_W / SPRITE_COLS;   // 384
-const FRAME_H       = FRAME_W;                  // cells are laid out on a 384px grid
-const FRAME_PAD     = 32;                       // avoid sampling grid lines between cells
-const RUN_FRAME_COUNT = 4;
-const RUN_DRAW_X = [-12, 8, 4, -4];             // keep active run frames visually centered
-const RUN_DRAW_Y = [0, 0, 0, 3];               // per-frame vertical offset (pixels, +down)
-const SPRITE_DRAW_H = 120;
-const SPRITE_DRAW_W = SPRITE_DRAW_H * (FRAME_W / FRAME_H);
+// Hera sprite sheet (assets/sprites/hera-sheet.png) — frames cut from the
+// "Hera, Queen of the Gods" reference art (sprites-init.png). Transparent
+// background, feet resting on the bottom edge of each frame box.
+// ax = x (in sheet px) of the planted foot inside the frame; every frame is
+// drawn with that foot pinned to Hera's ground point so the animation
+// doesn't slide. The kick frame has the impact spark baked in at the foot.
+const HERA_FRAMES = {
+  idle0: { x: 2,   y: 7, w: 160, h: 221, ax: 70 },
+  idle1: { x: 164, y: 8, w: 162, h: 220, ax: 84 },
+  walk0: { x: 328, y: 6, w: 153, h: 222, ax: 93 },
+  walk1: { x: 483, y: 7, w: 166, h: 221, ax: 102 },
+  kick:  { x: 651, y: 2, w: 318, h: 226, ax: 139 },
+};
+const HERA_SCALE = 0.55;   // sheet px -> screen px (~122px standing height)
+const RUN_LEAN   = 0.06;   // forward lean while running (radians)
 
 const GameState = {
   LOADING:      'LOADING',
@@ -74,6 +74,8 @@ let enemies  = [];
 let peacocks = [];
 let effects  = [];
 
+let animT = 0;   // world animation clock (seconds); frozen while paused
+
 let eTimer = 0, eInterval = 2.0;
 let pTimer = 0, pInterval = 5.0;
 
@@ -97,182 +99,14 @@ const hera = {
   x: HERA_X, y: GY - HERA_H,
   vy: 0, grounded: true,
   anim: 'run',   // 'run' | 'jump' | 'kick'
-  frame: 0, fTimer: 0, kickTimer: 0,
+  frame: 0, runPhase: 0, kickTimer: 0,
 };
 
-// Sprite sheet with white-background removed
+// Sprite sheet ships with a transparent background — no cleanup needed.
 const heraImg = new Image();
-let heraSpriteCanvas = null;
-let heraSpriteReady  = false;
-heraImg.onload = () => {
-  const oc = document.createElement('canvas');
-  oc.width  = SPRITE_W;
-  oc.height = SPRITE_H;
-  const oc2 = oc.getContext('2d', { willReadFrequently: true });
-  oc2.drawImage(heraImg, 0, 0);
-  const id = oc2.getImageData(0, 0, SPRITE_W, SPRITE_H);
-  const d  = id.data;
-
-  // Edge-seeded flood fill: mark all near-white pixels reachable from the
-  // sheet border as background. This catches the white cell background AND
-  // the gray grid lines between sprite cells (which connect to the outer edge),
-  // regardless of their exact shade.
-  const W = SPRITE_W, H = SPRITE_H;
-  const isBg = new Uint8Array(W * H);
-  const queue = new Int32Array(W * H);
-  let head = 0, tail = 0;
-
-  const push = (px) => {
-    const i4 = px << 2;
-    if (!isBg[px] && Math.min(d[i4], d[i4 + 1], d[i4 + 2]) > 190) {
-      isBg[px] = 1;
-      queue[tail++] = px;
-    }
-  };
-
-  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
-  for (let y = 1; y < H - 1; y++) { push(y * W); push(y * W + W - 1); }
-
-  while (head < tail) {
-    const px = queue[head++];
-    const x = px % W, y = (px / W) | 0;
-    if (x > 0)     push(px - 1);
-    if (x < W - 1) push(px + 1);
-    if (y > 0)     push(px - W);
-    if (y < H - 1) push(px + W);
-  }
-
-  // Second pass: remove border-connected gray guide marks from each cell.
-  // Artist registration marks (~rgb 110–190, near-zero saturation) survive the
-  // white flood fill because min(r,g,b) < 190. Seed from each cell's four edges.
-  head = 0; tail = 0;
-  const pushGuide = (px) => {
-    if (isBg[px]) return;
-    const i4 = px << 2;
-    if (d[i4 + 3] < 40) return;
-    const r = d[i4], g = d[i4 + 1], b = d[i4 + 2];
-    if (Math.max(r, g, b) - Math.min(r, g, b) < 25 && Math.min(r, g, b) > 100 && Math.max(r, g, b) < 195) {
-      isBg[px] = 1;
-      queue[tail++] = px;
-    }
-  };
-
-  for (let cellRow = 0; cellRow < Math.ceil(H / FRAME_H); cellRow++) {
-    for (let cellCol = 0; cellCol < SPRITE_COLS; cellCol++) {
-      const cx0 = cellCol * FRAME_W;
-      const cy0 = cellRow * FRAME_H;
-      const cx1 = Math.min(cx0 + FRAME_W, W);
-      const cy1 = Math.min(cy0 + FRAME_H, H);
-      for (let x = cx0; x < cx1; x++) { pushGuide(cy0 * W + x); pushGuide((cy1 - 1) * W + x); }
-      for (let y = cy0 + 1; y < cy1 - 1; y++) { pushGuide(y * W + cx0); pushGuide(y * W + cx1 - 1); }
-    }
-  }
-
-  while (head < tail) {
-    const px = queue[head++];
-    const x = px % W, y = (px / W) | 0;
-    if (x > 0)     pushGuide(px - 1);
-    if (x < W - 1) pushGuide(px + 1);
-    if (y > 0)     pushGuide(px - W);
-    if (y < H - 1) pushGuide(px + W);
-  }
-
-  const onGridLine = (x, y) => {
-    const gx = x % FRAME_W;
-    const gy = y % FRAME_H;
-    return gx <= 3 || gx >= FRAME_W - 4 || gy <= 3 || gy >= FRAME_H - 4;
-  };
-
-  for (let i = 0; i < W * H; i++) {
-    if (isBg[i]) {
-      d[i * 4 + 3] = 0;
-    } else {
-      const x = i % W;
-      const y = (i / W) | 0;
-      if (onGridLine(x, y)) {
-        d[i * 4 + 3] = 0;
-        continue;
-      }
-
-      // Fade any remaining near-white fringe not reachable from the border
-      const lo = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
-      if (lo > 210) {
-        d[i * 4 + 3] = Math.round(d[i * 4 + 3] * (235 - lo) / 25);
-      }
-    }
-  }
-
-  function clearThinFrameArtifacts(col, row) {
-    const x0 = col * FRAME_W;
-    const y0 = row * FRAME_H;
-    const fw = Math.min(FRAME_W, W - x0);
-    const fh = Math.min(FRAME_H, H - y0);
-    if (fw <= 0 || fh <= 0) return;
-
-    const seen = new Uint8Array(fw * fh);
-    const stack = [];
-    const pixels = [];
-
-    const alphaAt = (x, y) => d[((y0 + y) * W + x0 + x) * 4 + 3];
-    const clearAt = (x, y) => { d[((y0 + y) * W + x0 + x) * 4 + 3] = 0; };
-
-    for (let start = 0; start < fw * fh; start++) {
-      if (seen[start]) continue;
-      const sx = start % fw;
-      const sy = (start / fw) | 0;
-      if (alphaAt(sx, sy) <= 20) continue;
-
-      let minX = sx, maxX = sx, minY = sy, maxY = sy;
-      stack.length = 0;
-      pixels.length = 0;
-      seen[start] = 1;
-      stack.push(start);
-
-      while (stack.length) {
-        const p = stack.pop();
-        const x = p % fw;
-        const y = (p / fw) | 0;
-        pixels.push(p);
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-
-        const neighbors = [
-          x > 0      ? p - 1  : -1,
-          x < fw - 1 ? p + 1  : -1,
-          y > 0      ? p - fw : -1,
-          y < fh - 1 ? p + fw : -1,
-        ];
-        for (const n of neighbors) {
-          if (n < 0 || seen[n]) continue;
-          const nx = n % fw;
-          const ny = (n / fw) | 0;
-          if (alphaAt(nx, ny) <= 20) continue;
-          seen[n] = 1;
-          stack.push(n);
-        }
-      }
-
-      const compW = maxX - minX + 1;
-      const compH = maxY - minY + 1;
-      const isThinSeparator = compW <= 10 && compH >= 12 && pixels.length >= 20;
-      const isGroundGuide = compW >= 40 && compH <= 10 && minY > fh * 0.55;
-      if (isThinSeparator || isGroundGuide) {
-        for (const p of pixels) clearAt(p % fw, (p / fw) | 0);
-      }
-    }
-  }
-
-  for (let row = 0; row < Math.ceil(SPRITE_H / FRAME_H); row++) {
-    for (let col = 0; col < SPRITE_COLS; col++) clearThinFrameArtifacts(col, row);
-  }
-
-  oc2.putImageData(id, 0, 0);
-  heraSpriteCanvas = oc;
-  heraSpriteReady  = true;
-};
-heraImg.src = 'assets/sprites/hera-spritesheet.png';
+let heraSpriteReady = false;
+heraImg.onload = () => { heraSpriteReady = true; };
+heraImg.src = 'assets/sprites/hera-sheet.png';
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
 
@@ -442,9 +276,9 @@ function startRun() {
   question = null;
   skyOff = 0; cloudOff = 0; gndOff = 0;
 
-  isCharging = false; chargeT = 0;
+  isCharging = false; chargeT = 0; animT = 0;
   hera.y = GY - HERA_H; hera.vy = 0; hera.grounded = true;
-  hera.anim = 'run'; hera.frame = 0; hera.fTimer = 0; hera.kickTimer = 0;
+  hera.anim = 'run'; hera.frame = 0; hera.runPhase = 0; hera.kickTimer = 0;
 
   factorRng.textContent = `${minFactor}–${maxFactor}`;
   setState(GameState.RUNNING);
@@ -515,7 +349,7 @@ function spawnEnemy() {
     else if (tier === 1) y = base - rand(105, 195);  // mid  — normal jump
     else                 y = base - rand(210, 305);  // high — needs charge
   }
-  enemies.push({ type, x: CW + 20, y, w, h, defeated: false });
+  enemies.push({ type, x: CW + 20, y, w, h, defeated: false, phase: rand(0, Math.PI * 2) });
 }
 
 function spawnPeacock() {
@@ -560,9 +394,11 @@ function update(dt) {
   if (isCharging && hera.grounded) chargeT = Math.min(chargeT + dt, MAX_CHARGE);
 
   // Animation
-  hera.fTimer += dt;
-  if (hera.anim === 'run' && hera.fTimer > 0.11) {
-    hera.frame = (hera.frame + 1) % RUN_FRAME_COUNT; hera.fTimer = 0;
+  animT += dt;
+  if (hera.anim === 'run') {
+    // Stride rate scales with world speed so her feet keep up with the ground
+    hera.runPhase += dt * clamp(worldSpeed / 28, 7, 12);
+    hera.frame = Math.floor(hera.runPhase) % 2;
   }
   if (hera.anim === 'kick') {
     hera.kickTimer -= dt;
@@ -708,16 +544,21 @@ function drawGround() {
 
 // ─── Hera ─────────────────────────────────────────────────────────────────────
 
-function getSpriteFrame(anim, frame, kickTimer) {
-  if (anim === 'run')  return [frame % RUN_FRAME_COUNT, 0];
-  if (anim === 'jump') return [1, 1];
-  // Kick: pose/extension first, then impact-with-sparks
-  if (anim === 'kick') return kickTimer > 0.175 ? [2, 1] : [3, 1];
-  return [0, 0];
+// Draw a sheet frame with its planted foot pinned at (footX, footY),
+// optionally rotated about that foot and squash/stretched.
+function drawHeraFrame(name, footX, footY, rot = 0, sclX = 1, sclY = 1) {
+  const f = HERA_FRAMES[name];
+  ctx.save();
+  ctx.translate(footX, footY);
+  if (rot) ctx.rotate(rot);
+  ctx.scale(sclX, sclY);
+  ctx.drawImage(heraImg, f.x, f.y, f.w, f.h,
+    -f.ax * HERA_SCALE, -f.h * HERA_SCALE, f.w * HERA_SCALE, f.h * HERA_SCALE);
+  ctx.restore();
 }
 
 function drawHera() {
-  const { x, y, anim, frame, kickTimer } = hera;
+  const { x, y, anim } = hera;
   const chargeFrac = (isCharging && hera.grounded) ? clamp(chargeT / MAX_CHARGE, 0, 1) : 0;
   const cx = x + HERA_W / 2;
   ctx.save();
@@ -725,7 +566,7 @@ function drawHera() {
   // Gold aura — radiates around Hera's body when charging
   if (chargeFrac > 0) {
     const heraCY = y + HERA_H / 2;
-    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 80);
+    const pulse = 0.5 + 0.5 * Math.sin(animT * 12.5);
     // Outer body halo
     const outerR = 28 + chargeFrac * 24 + pulse * 8;
     const og = ctx.createRadialGradient(cx, heraCY, 4, cx, heraCY, outerR);
@@ -758,18 +599,20 @@ function drawHera() {
   ctx.beginPath(); ctx.ellipse(cx, GY + 4, 26 + chargeFrac * 12, 6, 0, 0, Math.PI * 2); ctx.fill();
 
   if (heraSpriteReady) {
-    const [col, row] = getSpriteFrame(anim, frame, kickTimer);
-    // Kick frames have the body pushed into the left pad zone; sample from the
-    // cell's left edge (no left pad) so the torso isn't clipped.
-    const kickXShift = (anim === 'kick') ? FRAME_PAD : 0;
-    const sx = col * FRAME_W + FRAME_PAD - kickXShift;
-    const sy = row * FRAME_H + FRAME_PAD;
-    const sw = FRAME_W - FRAME_PAD * 2;
-    const sh = FRAME_H - FRAME_PAD * 2;
-    const drawX = cx - SPRITE_DRAW_W / 2 + (anim === 'run' ? RUN_DRAW_X[col] : 0)
-                  - kickXShift * (SPRITE_DRAW_W / sw);
-    const drawY = y + HERA_H - SPRITE_DRAW_H + (anim === 'run' ? RUN_DRAW_Y[col] : 0);
-    ctx.drawImage(heraSpriteCanvas, sx, sy, sw, sh, drawX, drawY, SPRITE_DRAW_W, SPRITE_DRAW_H);
+    const footY = y + HERA_H;
+    if (anim === 'kick') {
+      drawHeraFrame('kick', cx, footY);
+    } else if (anim === 'jump') {
+      // Mid-stride frame, tilting back on the way up and forward coming down
+      const tilt = clamp(hera.vy * 0.00012, -0.12, 0.14);
+      drawHeraFrame('walk1', cx, footY, tilt);
+    } else {
+      // Run: alternate the two stride frames with a bounce; crouch while charging
+      const bounce = 2.5 * Math.abs(Math.sin(hera.runPhase * Math.PI));
+      const name = hera.frame === 0 ? 'walk0' : 'walk1';
+      drawHeraFrame(name, cx, footY - bounce, RUN_LEAN,
+        1 + chargeFrac * 0.05, 1 - chargeFrac * 0.09);
+    }
   } else {
     // Fallback while sprite loads
     ctx.fillStyle = '#9b1c1c';
@@ -781,55 +624,46 @@ function drawHera() {
   ctx.restore();
 }
 
-function drawDebugSpriteFrame(label, col, row, x, y, scale = 0.5, active = true) {
-  const w = FRAME_W * scale;
-  const h = FRAME_H * scale;
+function drawDebugSpriteFrame(label, name, x, y, scale = 0.7, active = true) {
+  const f = HERA_FRAMES[name];
+  const cellH = 226 * scale;              // tallest frame, keeps baselines level
+  const w = f.w * scale;
+  const h = f.h * scale;
   debugCtx.save();
   debugCtx.fillStyle = 'rgba(255,255,255,0.04)';
-  debugCtx.fillRect(x, y, w, h);
+  debugCtx.fillRect(x, y, w, cellH);
   debugCtx.strokeStyle = active ? 'rgba(240,192,64,0.65)' : 'rgba(240,224,255,0.3)';
   debugCtx.lineWidth = 1;
-  debugCtx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  debugCtx.strokeRect(x + 0.5, y + 0.5, w - 1, cellH - 1);
 
-  debugCtx.strokeStyle = 'rgba(96,200,255,0.5)';
+  // Cyan vertical: the planted-foot anchor (f.ax); red dashed: ground baseline
+  debugCtx.strokeStyle = 'rgba(96,200,255,0.6)';
   debugCtx.beginPath();
-  debugCtx.moveTo(x + w / 2, y);
-  debugCtx.lineTo(x + w / 2, y + h);
-  debugCtx.moveTo(x, y + h - 24);
-  debugCtx.lineTo(x + w, y + h - 24);
+  debugCtx.moveTo(x + f.ax * scale, y);
+  debugCtx.lineTo(x + f.ax * scale, y + cellH);
   debugCtx.stroke();
-
-  // Red dashed ground reference: where feet should anchor relative to draw region
-  const groundLineY = y + h - SPRITE_DRAW_H * scale;
   debugCtx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
   debugCtx.lineWidth = 1.5;
   debugCtx.setLineDash([4, 3]);
   debugCtx.beginPath();
-  debugCtx.moveTo(x, groundLineY);
-  debugCtx.lineTo(x + w, groundLineY);
+  debugCtx.moveTo(x, y + cellH - 1);
+  debugCtx.lineTo(x + w, y + cellH - 1);
   debugCtx.stroke();
   debugCtx.setLineDash([]);
-  debugCtx.fillStyle = 'rgba(255,80,80,0.9)';
-  debugCtx.font = '10px monospace';
-  debugCtx.fillText('GND', x + w - 28, groundLineY - 2);
 
   if (heraSpriteReady) {
-    const sx = col * FRAME_W + FRAME_PAD;
-    const sy = row * FRAME_H + FRAME_PAD;
-    const sw = FRAME_W - FRAME_PAD * 2;
-    const sh = FRAME_H - FRAME_PAD * 2;
     debugCtx.imageSmoothingEnabled = false;
-    debugCtx.drawImage(heraSpriteCanvas, sx, sy, sw, sh, x, y, w, h);
+    debugCtx.drawImage(heraImg, f.x, f.y, f.w, f.h, x, y + cellH - h, w, h);
   }
 
   debugCtx.fillStyle = '#f0c040';
   debugCtx.font = '14px Georgia, serif';
-  debugCtx.fillText(label, x, y + h + 18);
+  debugCtx.fillText(label, x, y + cellH + 18);
   if (!active) {
     debugCtx.fillStyle = 'rgba(13,0,32,0.62)';
-    debugCtx.fillRect(x, y, w, h);
+    debugCtx.fillRect(x, y, w, cellH);
     debugCtx.fillStyle = '#f0e0ff';
-    debugCtx.fillText('not used', x + 62, y + h / 2);
+    debugCtx.fillText('idle only', x + 8, y + cellH / 2);
   }
   debugCtx.restore();
 }
@@ -841,124 +675,292 @@ function drawSpriteDebug() {
 
   debugCtx.fillStyle = '#f0e0ff';
   debugCtx.font = '16px Georgia, serif';
-  debugCtx.fillText(`Run frames (${RUN_FRAME_COUNT} used)`, 24, 28);
-  debugCtx.font = '13px Georgia, serif';
-  debugCtx.fillText(`X: [${RUN_DRAW_X.join(', ')}]  Y: [${RUN_DRAW_Y.join(', ')}]`, 222, 28);
-  debugCtx.fillText('Jump frames', 24, 254);
-  debugCtx.fillText('Kick frames', 424, 254);
+  debugCtx.fillText('Run cycle (walk0 ↔ walk1, jump uses walk1)', 24, 28);
+  debugCtx.fillText('Kick (spark baked in)', 324, 254);
+  debugCtx.fillText('Idle (unused in run)', 24, 254);
 
-  for (let i = 0; i < 4; i++) {
-    drawDebugSpriteFrame(`run ${i}`, i, 0, 24 + i * 220, 42, 0.5, i < RUN_FRAME_COUNT);
-  }
-
-  drawDebugSpriteFrame('jump 0', 0, 1, 24, 270, 0.5);
-  drawDebugSpriteFrame('jump 1', 1, 1, 224, 270, 0.5);
-  drawDebugSpriteFrame('kick 0', 2, 1, 424, 270, 0.5);
-  drawDebugSpriteFrame('kick 1', 3, 1, 624, 270, 0.5);
+  drawDebugSpriteFrame('walk0', 'walk0', 24, 42);
+  drawDebugSpriteFrame('walk1', 'walk1', 160, 42);
+  drawDebugSpriteFrame('idle0', 'idle0', 24, 270, 0.7, false);
+  drawDebugSpriteFrame('idle1', 'idle1', 160, 270, 0.7, false);
+  drawDebugSpriteFrame('kick', 'kick', 324, 270);
 }
 
 // ─── Enemies ──────────────────────────────────────────────────────────────────
+// Zeus's disguises, styled after the reference art (sprites-init.png):
+// white eagle, white swan, angry silver storm cloud, cream bull with gold
+// horns. All animate off `animT` with a per-enemy phase so they desync.
+
+const OUTLINE = 'rgba(43, 34, 64, 0.9)';
+
+function drawBolt(x, y, s, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.translate(x, y); ctx.scale(s, s);
+  ctx.beginPath();
+  ctx.moveTo(2, -8); ctx.lineTo(-3, 0); ctx.lineTo(0, 0);
+  ctx.lineTo(-2, 8); ctx.lineTo(3, -1); ctx.lineTo(0, -1);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
 
 function drawEagle(e) {
-  const t = Date.now() * 0.007;
-  ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
+  const t   = animT * 9 + e.phase;
+  const flap = Math.sin(t);
+  const bob  = Math.sin(animT * 2.8 + e.phase) * 3;
+  ctx.save();
+  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 + bob);
+  ctx.lineJoin = 'round';
 
-  const flap = Math.sin(t) * 14;
-  ctx.fillStyle = '#8b4513';
+  // Wings — raised feather fans beating at the shoulder
   for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(side * 6, 2);
-    ctx.lineTo(side * 36, -8 - flap);
-    ctx.lineTo(side * 24, 8);
-    ctx.closePath(); ctx.fill();
+    ctx.save();
+    ctx.translate(side * 8, -4);
+    ctx.rotate(side * flap * 0.28);
+    ctx.strokeStyle = side < 0 ? '#d8d2c2' : '#f4f0e2';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const a = 0.3 + i * 0.3;
+      const len = 26 - i * 2.5;
+      ctx.lineWidth = 7 - i;
+      ctx.beginPath();
+      ctx.moveTo(0, 2);
+      ctx.lineTo(side * Math.sin(a) * len, -Math.cos(a) * len);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
-  ctx.fillStyle = '#a0521d';
-  ctx.beginPath(); ctx.ellipse(0, 6, 18, 11, 0, 0, Math.PI * 2); ctx.fill();
 
-  ctx.fillStyle = '#f5f5dc';
-  circle(-14, -4, 8);
-  ctx.fillStyle = '#ffa500';
-  ctx.beginPath(); ctx.moveTo(-21, -4); ctx.lineTo(-30, -1); ctx.lineTo(-21, 0); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#111';
-  circle(-17, -6, 2);
+  // Tail feathers trailing behind
+  ctx.fillStyle = '#e8e2d0';
+  ctx.beginPath();
+  ctx.moveTo(14, 4); ctx.lineTo(30, 0); ctx.lineTo(28, 6);
+  ctx.lineTo(31, 8); ctx.lineTo(26, 12); ctx.lineTo(14, 12);
+  ctx.closePath(); ctx.fill();
+
+  // Body with breast-feather scallops
+  ctx.fillStyle = '#f4f0e2';
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(2, 8, 17, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(180,170,150,0.7)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(-2, 7, 5, 0.2, Math.PI - 0.2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(6, 11, 5, 0.2, Math.PI - 0.2); ctx.stroke();
+
+  // Head — white, glaring at Hera
+  ctx.fillStyle = '#faf7ec';
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(-14, -6, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+  // Big hooked golden beak
+  ctx.fillStyle = '#e8a825';
+  ctx.beginPath();
+  ctx.moveTo(-22, -11);
+  ctx.quadraticCurveTo(-36, -10, -33, -2);
+  ctx.quadraticCurveTo(-31, 2, -27, -1);
+  ctx.quadraticCurveTo(-26, 1, -21, 0);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Angry brow and eye
+  ctx.strokeStyle = '#3a3050'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-21, -13); ctx.lineTo(-13, -10); ctx.stroke();
+  ctx.fillStyle = '#2b2240'; circle(-17, -8, 2.2);
+
+  // Talons tucking with the wingbeat
+  ctx.strokeStyle = '#e0a020'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-4, 19); ctx.lineTo(-6, 25 + flap * 1.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4, 20);  ctx.lineTo(3, 26 - flap * 1.5);  ctx.stroke();
 
   ctx.restore();
 }
 
 function drawSwan(e) {
-  ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
+  const bob  = Math.sin(animT * 2.4 + e.phase) * 3;
+  const flap = Math.sin(animT * 6 + e.phase);
+  const nod  = Math.sin(animT * 2.4 + e.phase + 0.8) * 1.5;
+  ctx.save();
+  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 + bob);
 
-  ctx.fillStyle = '#fffef0';
-  ctx.beginPath(); ctx.ellipse(0, 8, 26, 13, 0, 0, Math.PI * 2); ctx.fill();
+  // Body
+  ctx.fillStyle = '#f2f0f8';
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(4, 8, 22, 12, -0.08, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
 
-  ctx.strokeStyle = '#fffef0'; ctx.lineWidth = 8; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(-8, 0); ctx.bezierCurveTo(-8, -16, -26, -20, -28, -9); ctx.stroke();
-  ctx.fillStyle = '#fffef0'; circle(-27, -12, 7);
-  ctx.fillStyle = '#e8c090'; ctx.fillRect(-35, -13, 10, 3);
-  ctx.fillStyle = '#111'; circle(-30, -14, 1.5);
+  // Upturned tail
+  ctx.fillStyle = '#f2f0f8';
+  ctx.beginPath();
+  ctx.moveTo(22, 2); ctx.quadraticCurveTo(32, -4, 34, -10);
+  ctx.quadraticCurveTo(28, 0, 20, 8);
+  ctx.closePath(); ctx.fill();
 
-  ctx.fillStyle = '#e8e8d0';
-  ctx.beginPath(); ctx.ellipse(6, 0, 18, 9, -0.25, 0, Math.PI * 2); ctx.fill();
+  // Layered wing, gently beating
+  ctx.save();
+  ctx.translate(6, 2);
+  ctx.rotate(flap * 0.18 - 0.05);
+  ctx.fillStyle = '#dcd8ec';
+  ctx.beginPath(); ctx.ellipse(6, 2, 16, 8, -0.35, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#efedf8';
+  ctx.beginPath(); ctx.ellipse(2, -1, 13, 6.5, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(150,145,180,0.8)'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(6 + i * 3, 8 - i * 4);
+    ctx.lineTo(18 + i * 3, 4 - i * 4);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Tall S-curved neck with a slow nod, shaded so it reads against the body
+  ctx.strokeStyle = '#dcd8ec'; ctx.lineWidth = 9.5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-8, 6);
+  ctx.bezierCurveTo(-16, -2, -24, -8, -22, -23 + nod);
+  ctx.stroke();
+  ctx.strokeStyle = '#f6f4fb'; ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(-8, 5);
+  ctx.bezierCurveTo(-16, -3, -24, -9, -22, -23 + nod);
+  ctx.stroke();
+
+  // Head raised high: black mask, orange beak
+  ctx.fillStyle = '#f6f4fb';
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(-22, -25 + nod, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#2b2240';
+  ctx.beginPath(); ctx.ellipse(-26, -26 + nod, 4.5, 3, 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#e8963c';
+  ctx.beginPath();
+  ctx.moveTo(-28, -29 + nod); ctx.lineTo(-38, -24 + nod); ctx.lineTo(-28, -22 + nod);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff'; circle(-26, -27 + nod, 1.4);
 
   ctx.restore();
 }
 
 function drawZeusCloud(e) {
-  ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
+  const cx0 = e.x + e.w / 2, cy0 = e.y + e.h / 2;
+  const puff = 1 + Math.sin(animT * 3 + e.phase) * 0.04;
+  ctx.save();
+  ctx.translate(cx0, cy0);
+  ctx.scale(puff, 2 - puff);   // breathe: widen while flattening
 
-  ctx.fillStyle = '#6a6a8a'; drawCloud(0, 8, 30);
+  // Cumulus puffs — dark base, silver body, bright crown
+  ctx.fillStyle = '#a8a2c6';
+  for (const [px, py, r] of [[-20, 12, 12], [-2, 15, 13], [16, 12, 12], [27, 6, 9]]) circle(px, py, r);
+  ctx.fillStyle = '#c7c2dd';
+  for (const [px, py, r] of [[-24, -2, 13], [-8, -10, 15], [10, -8, 14], [24, -2, 11], [0, 4, 16], [18, 4, 12]]) circle(px, py, r);
+  ctx.fillStyle = '#e5e1f1';
+  for (const [px, py, r] of [[-12, -12, 8], [6, -13, 8], [-26, -6, 6]]) circle(px, py, r);
 
-  ctx.fillStyle = '#e0cca0';
-  ctx.beginPath(); ctx.ellipse(0, -4, 15, 19, 0, 0, Math.PI * 2); ctx.fill();
-
-  ctx.fillStyle = '#ddd';
-  ctx.beginPath(); ctx.ellipse(0, 12, 13, 9, 0, 0, Math.PI * 2); ctx.fill();
-
-  ctx.fillStyle = '#333';
-  ctx.fillRect(-9, -8, 5, 5); ctx.fillRect(4, -8, 5, 5);
-  ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(-11, -13); ctx.lineTo(-4, -10); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(11,  -13); ctx.lineTo(4,  -10); ctx.stroke();
-
-  // Lightning bolt
-  ctx.fillStyle = '#ffd700';
-  ctx.beginPath();
-  ctx.moveTo(18, -17); ctx.lineTo(11, -4); ctx.lineTo(17, -4);
-  ctx.lineTo(10, 12);  ctx.lineTo(14, 1);  ctx.lineTo(8,  1);
-  ctx.closePath(); ctx.fill();
+  // Furious golden eyes under heavy brows, and a thundering frown
+  ctx.fillStyle = '#f2b52a';
+  ctx.beginPath(); ctx.ellipse(-8, -2, 4.5, 3.5, 0.15, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(8, -2, 4.5, 3.5, -0.15, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2b2240'; circle(-7, -2, 1.8); circle(7, -2, 1.8);
+  ctx.strokeStyle = '#4a4066'; ctx.lineCap = 'round';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.moveTo(-14, -9); ctx.lineTo(-3, -5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(14, -9);  ctx.lineTo(3, -5);  ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(0, 14, 6, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
 
   ctx.restore();
+
+  // Crackling lightning, flickering out of sync
+  const f1 = Math.sin(animT * 13 + e.phase * 3);
+  if (f1 > 0.1) drawBolt(cx0 + 34, cy0 - 8, 1.4, '#ffd700', Math.min(1, f1 * 1.5));
+  const f2 = Math.sin(animT * 11 + e.phase * 5 + 2);
+  if (f2 > 0.3) drawBolt(cx0 - 30, cy0 + 16, 1.1, '#9be8ff', Math.min(1, f2 * 1.4));
+  const f3 = Math.sin(animT * 17 + e.phase * 7 + 4);
+  if (f3 > 0.55) drawBolt(cx0 + 14, cy0 + 24, 0.8, '#9be8ff', Math.min(1, f3));
+
+  // Twinkling gold sparks
+  ctx.fillStyle = '#ffd700';
+  const sparks = [[-32, -16], [30, 8], [-6, -24]];
+  for (let i = 0; i < sparks.length; i++) {
+    const a = 0.5 + 0.5 * Math.sin(animT * 9 + i * 2.1 + e.phase);
+    ctx.globalAlpha = a * 0.9;
+    circle(cx0 + sparks[i][0], cy0 + sparks[i][1], 1.6);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawBull(e) {
-  const t = Date.now() * 0.012;
-  ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
+  const g = animT * 12 + e.phase;
+  const bounce = Math.abs(Math.sin(g)) * 2.5;
+  ctx.save();
+  ctx.translate(e.x + e.w / 2, e.y + e.h / 2 - bounce);
+  ctx.lineJoin = 'round';
 
-  ctx.fillStyle = '#8b6914';
-  ctx.beginPath(); ctx.ellipse(0, 4, 28, 21, 0, 0, Math.PI * 2); ctx.fill();
+  const BODY = '#ecdcae', SHADE = '#d2bc84', DARK = '#3f3350';
 
-  ctx.fillStyle = '#9b7924';
-  ctx.beginPath(); ctx.ellipse(-22, 0, 15, 13, 0, 0, Math.PI * 2); ctx.fill();
+  // Flicking tail
+  const tw = Math.sin(g * 0.5) * 4;
+  ctx.strokeStyle = SHADE; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(26, -2); ctx.quadraticCurveTo(36, 2 + tw, 34, 12 + tw); ctx.stroke();
+  ctx.fillStyle = '#8a6a3a'; circle(34, 13 + tw, 3);
 
-  ctx.fillStyle = '#e0d010';
-  for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(-22 + side * 10, -10);
-    ctx.lineTo(-22 + side * 20, -26);
-    ctx.lineTo(-22 + side * 12, -8);
-    ctx.closePath(); ctx.fill();
+  // Galloping legs (uneven phases for a gallop, not a trot)
+  const legPhase = [0, 2.4, 1.1, 3.5];
+  const legX = [-18, -8, 12, 22];
+  for (let i = 0; i < 4; i++) {
+    ctx.save();
+    ctx.translate(legX[i], 12);
+    ctx.rotate(Math.sin(g + legPhase[i]) * 0.55);
+    ctx.fillStyle = i % 2 === 0 ? SHADE : BODY;
+    ctx.fillRect(-3.5, 0, 7, 18);
+    ctx.fillStyle = '#6b4a2a';
+    ctx.fillRect(-3.5, 15, 7, 5);
+    if (i === 1) {   // gold band, as in the art
+      ctx.fillStyle = '#d4a017';
+      ctx.fillRect(-4, 8, 8, 4);
+    }
+    ctx.restore();
   }
 
-  ctx.fillStyle = '#111'; circle(-26, -3, 2.5);
-  ctx.fillStyle = '#5a3a0a'; circle(-32, 4, 3); circle(-27, 5, 3);
+  // Massive cream body with a muscled shoulder hump
+  ctx.fillStyle = BODY;
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(2, 0, 28, 19, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f6ecd0';
+  ctx.beginPath(); ctx.ellipse(-8, -10, 14, 8, -0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = SHADE;
+  ctx.beginPath(); ctx.ellipse(8, 10, 16, 7, 0.1, 0, Math.PI * 2); ctx.fill();
 
-  const la = Math.sin(t) * 5;
-  ctx.fillStyle = '#7a5910';
-  ctx.fillRect(-12, 22, 10, 16 + la);
-  ctx.fillRect(  4, 22, 10, 16 - la);
-  ctx.fillRect(-22, 22, 10, 16 - la);
-  ctx.fillRect( 16, 22, 10, 16 + la);
+  // Lowered head, swinging with the gallop
+  ctx.save();
+  ctx.translate(-22, -4 + Math.sin(g) * 1.2);
 
+  // Ear behind the horns
+  ctx.fillStyle = SHADE;
+  ctx.beginPath(); ctx.ellipse(9, -9, 5, 3, 0.5, 0, Math.PI * 2); ctx.fill();
+
+  // Great golden horns sweeping up like a lyre
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 5; ctx.strokeStyle = '#c99a20';
+  ctx.beginPath(); ctx.moveTo(8, -7); ctx.quadraticCurveTo(18, -14, 14, -26); ctx.stroke();
+  ctx.lineWidth = 6; ctx.strokeStyle = '#e8b62e';
+  ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(-16, -16, -12, -28); ctx.stroke();
+  ctx.lineWidth = 2; ctx.strokeStyle = '#f8dc7a';
+  ctx.beginPath(); ctx.moveTo(-8, -11); ctx.quadraticCurveTo(-14, -17, -12, -25); ctx.stroke();
+
+  // Head, muzzle, nostrils
+  ctx.fillStyle = BODY;
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, 12, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#d9bd94';
+  ctx.beginPath(); ctx.ellipse(-5, 6, 9, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = DARK; circle(-9, 5, 1.6); circle(-4, 7, 1.6);
+
+  // Angry golden eye
+  ctx.fillStyle = '#f2b52a';
+  ctx.beginPath(); ctx.ellipse(-5, -4, 3.5, 2.6, 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = DARK; circle(-6, -4, 1.4);
+  ctx.strokeStyle = DARK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-11, -9); ctx.lineTo(-2, -7); ctx.stroke();
+
+  ctx.restore();
   ctx.restore();
 }
 

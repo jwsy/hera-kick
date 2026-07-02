@@ -59,12 +59,11 @@ Render order: sky background → parallax clouds/columns → ground → peacocks
 
 ### Hera Sprite Sheet
 
-`assets/sprites/hera-spritesheet.png` — 4 columns × 3 rows (1536 × 1024 px):
-- Row 0: run frames 0–3
-- Row 1 col 0–1: jump; col 2–3: kick (col 3 has sparks)
-- Row 2: guard/idle and punch (not used in current gameplay)
+`assets/sprites/hera-sheet.png` — a single row of 5 variable-width frames cut from the reference art `sprites-init.png` ("Hera, Queen of the Gods"): `idle0`, `idle1`, `walk0`, `walk1`, `kick` (the kick frame has the impact spark baked in). The sheet ships with a transparent background — there is **no** load-time pixel cleanup. Frame boxes and the planted-foot anchor (`ax`) live in the `HERA_FRAMES` constant in `app.js`; every frame is drawn with that foot pinned to Hera's ground point. The run cycle alternates `walk0`/`walk1` with a sine bounce and forward lean; jumping reuses `walk1` with a velocity-based tilt. Regenerating the sheet: crop the five top-row poses from `sprites-init.png`, key out the purple background, bottom-align the frames, and update `HERA_FRAMES`.
 
-White background pixels are stripped at load time via `getImageData` pixel manipulation and stored in `heraSpriteCanvas`.
+### Enemies
+
+The four Zeus disguises are drawn procedurally in canvas (`drawEagle`, `drawSwan`, `drawZeusCloud`, `drawBull`), styled after the reference art: white eagle, white swan, angry silver storm cloud with flickering lightning, cream bull with golden horns. They animate off the module-level `animT` clock (accumulated in `update()`, so animation freezes on pause) plus a per-enemy random `phase` set at spawn.
 
 ### Jump System
 
