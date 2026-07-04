@@ -57,14 +57,14 @@ const RUN_LEAN   = 0.09;   // forward lean while running (radians)
 const ENEMY_FRAMES = {
   eagle0: { x: 2,   y: 8,  w: 80,  h: 94 },
   eagle1: { x: 84,  y: 8,  w: 80,  h: 94 },
-  swan0:  { x: 166, y: 16, w: 73,  h: 86 },
-  swan1:  { x: 241, y: 16, w: 73,  h: 86 },
-  cloud0: { x: 316, y: 6,  w: 103, h: 96 },
-  cloud1: { x: 421, y: 6,  w: 103, h: 96 },
-  bull0:  { x: 526, y: 2,  w: 80,  h: 100 },
-  bull1:  { x: 608, y: 2,  w: 80,  h: 100 },
-  peacock0: { x: 690, y: 32, w: 52, h: 70 },
-  peacock1: { x: 744, y: 32, w: 52, h: 70 },
+  swan0:  { x: 166, y: 16, w: 70,  h: 86 },
+  swan1:  { x: 238, y: 16, w: 70,  h: 86 },
+  cloud0: { x: 310, y: 6,  w: 103, h: 96 },
+  cloud1: { x: 415, y: 6,  w: 103, h: 96 },
+  bull0:  { x: 520, y: 2,  w: 80,  h: 100 },
+  bull1:  { x: 602, y: 2,  w: 80,  h: 100 },
+  peacock0: { x: 684, y: 26, w: 57, h: 76 },
+  peacock1: { x: 743, y: 26, w: 57, h: 76 },
 };
 const ENEMY_ANIM_HZ = { eagle: 6, swan: 4, cloud: 2.5, bull: 9 };
 
@@ -385,7 +385,7 @@ function spawnEnemy() {
 }
 
 function spawnPeacock() {
-  peacocks.push({ x: CW + 20, y: GY - 70, w: 60, h: 70, collected: false, phase: rand(0, Math.PI * 2) });
+  peacocks.push({ x: CW + 20, y: GY - 76, w: 64, h: 76, collected: false, phase: rand(0, Math.PI * 2) });
 }
 
 function spawnDust(x, y) {
