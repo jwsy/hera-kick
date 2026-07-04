@@ -55,16 +55,16 @@ const RUN_LEAN   = 0.09;   // forward lean while running (radians)
 // frames blit 1:1 with crisp pixels. Each disguise has two frames: the base
 // pose and a squashed variant (wing-beat / puff-breath / gallop-compress).
 const ENEMY_FRAMES = {
-  eagle0: { x: 2,   y: 8,  w: 67, h: 78 },
-  eagle1: { x: 71,  y: 8,  w: 67, h: 78 },
-  swan0:  { x: 140, y: 14, w: 57, h: 72 },
-  swan1:  { x: 199, y: 14, w: 57, h: 72 },
-  cloud0: { x: 258, y: 6,  w: 86, h: 80 },
-  cloud1: { x: 346, y: 6,  w: 86, h: 80 },
-  bull0:  { x: 434, y: 2,  w: 67, h: 84 },
-  bull1:  { x: 503, y: 2,  w: 67, h: 84 },
-  peacock0: { x: 572, y: 16, w: 52, h: 70 },
-  peacock1: { x: 626, y: 16, w: 52, h: 70 },
+  eagle0: { x: 2,   y: 8,  w: 80,  h: 94 },
+  eagle1: { x: 84,  y: 8,  w: 80,  h: 94 },
+  swan0:  { x: 166, y: 16, w: 73,  h: 86 },
+  swan1:  { x: 241, y: 16, w: 73,  h: 86 },
+  cloud0: { x: 316, y: 6,  w: 103, h: 96 },
+  cloud1: { x: 421, y: 6,  w: 103, h: 96 },
+  bull0:  { x: 526, y: 2,  w: 80,  h: 100 },
+  bull1:  { x: 608, y: 2,  w: 80,  h: 100 },
+  peacock0: { x: 690, y: 32, w: 52, h: 70 },
+  peacock1: { x: 744, y: 32, w: 52, h: 70 },
 };
 const ENEMY_ANIM_HZ = { eagle: 6, swan: 4, cloud: 2.5, bull: 9 };
 
@@ -366,7 +366,7 @@ const ETYPES = ['eagle', 'swan', 'cloud', 'bull'];
 
 function spawnEnemy() {
   const type = ETYPES[randInt(0, 3)];
-  const w = 75, h = type === 'bull' ? 75 : 60;
+  const w = 86, h = type === 'bull' ? 86 : 72;
   let y;
   if (type === 'bull') {
     y = GY - h;
@@ -776,11 +776,11 @@ function drawEnemy(e) {
   if (e.type === 'cloud') {
     const cx0 = e.x + e.w / 2, cy0 = e.y + e.h / 2;
     const f1 = Math.sin(animT * 13 + e.phase * 3);
-    if (f1 > 0.2) drawBolt(cx0 + 48, cy0 - 6, 1.2, '#ffd700', Math.min(1, f1 * 1.4));
+    if (f1 > 0.2) drawBolt(cx0 + 56, cy0 - 8, 1.3, '#ffd700', Math.min(1, f1 * 1.4));
     const f2 = Math.sin(animT * 11 + e.phase * 5 + 2);
-    if (f2 > 0.4) drawBolt(cx0 - 46, cy0 + 14, 1.0, '#9be8ff', Math.min(1, f2 * 1.3));
+    if (f2 > 0.4) drawBolt(cx0 - 54, cy0 + 16, 1.1, '#9be8ff', Math.min(1, f2 * 1.3));
     ctx.fillStyle = '#ffd700';
-    const sparks = [[-40, -22], [42, 16], [-8, -34]];
+    const sparks = [[-46, -26], [48, 18], [-10, -40]];
     for (let i = 0; i < sparks.length; i++) {
       ctx.globalAlpha = (0.5 + 0.5 * Math.sin(animT * 9 + i * 2.1 + e.phase)) * 0.9;
       circle(cx0 + sparks[i][0], cy0 + sparks[i][1], 1.6);
