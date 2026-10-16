@@ -292,7 +292,8 @@ button:focus-visible {
 #debug-canvas {
   width: 100%;
   height: auto;
-  max-height: calc(100vh - 130px);
+  max-width: min(100%, calc((100vh - 130px) * 1.76923077));
+  aspect-ratio: 920 / 520;
   background: #120025;
   border: 2px solid var(--gold);
   border-radius: 8px;
