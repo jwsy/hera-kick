@@ -58,6 +58,12 @@ const KICK_WINDUP = 0.07;
 const KICK_EXTENSION_END = 0.16;
 const TAKEOFF_DURATION = 0.085;
 const LAND_DURATION = 0.085;
+const CELEBRATION_TURN_DURATION = 1.08;
+const CELEBRATION_TURN_FRAMES = [0, 1, 2, 3, 4, 5, 6, 7, 0];
+const REWARD_SPARK_COUNT = 24;
+const REWARD_SPARK_START = 1.35;
+const REWARD_SPARK_STAGGER = 0.014;
+const REWARD_SPARK_TRAVEL = 0.78;
 
 // Cloud uses enemies-sheet.png; redrawn bull, peacock, eagle and swan use
 // ground-sheet.png. Both atlases are pre-scaled for crisp 1:1 drawing.
@@ -107,6 +113,8 @@ let lowPlayed   = false;   // stamina-low sound gating
 let enemies  = [];
 let peacocks = [];
 let effects  = [];
+let celebration = null;
+let collectedPeacock = null;
 let dusts    = [];   // footstep / landing dust puffs
 
 let animT = 0;   // world animation clock (seconds); frozen while paused
@@ -153,6 +161,13 @@ let groundSpriteReady = false;
 groundImg.onload = () => { groundSpriteReady = true; };
 groundImg.src = 'assets/sprites/ground-sheet.png';
 
+const celebrationImg = new Image();
+celebrationImg.src = 'assets/sprites/hera-turn-sheet.png';
+const peacockFlightImg = new Image();
+peacockFlightImg.src = 'assets/sprites/peacock-turn-sheet.png';
+const peacockExitImg = new Image();
+peacockExitImg.src = 'assets/sprites/peacock-exit-sheet.png';
+
 const olympusImg = new Image();
 const skyCloudImg = new Image();
 olympusImg.src = 'assets/backgrounds/olympus.png';
@@ -165,6 +180,8 @@ const ENEMY_DRAW_SCALE = { eagle: 1.2, cloud: 1.2, swan: 1, bull: 1 };
 
 const canvas   = document.getElementById('game-canvas');
 const ctx      = canvas.getContext('2d');
+const rewardCanvas = document.getElementById('reward-effects');
+const rewardCtx = rewardCanvas.getContext('2d');
 const hudEl    = document.getElementById('hud');
 const scoreVal = document.getElementById('score-value');
 const sBar     = document.getElementById('stamina-bar');
@@ -274,6 +291,10 @@ function resizeCanvas() {
   if (h > ch) { h = ch; w = h * ratio; }
   canvas.style.width  = w + 'px';
   canvas.style.height = h + 'px';
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  rewardCanvas.width = Math.round(window.innerWidth * dpr);
+  rewardCanvas.height = Math.round(window.innerHeight * dpr);
+  rewardCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 // ─── Multiplication ───────────────────────────────────────────────────────────
@@ -326,7 +347,8 @@ function startRun() {
   enemies = []; peacocks = []; effects = []; dusts = [];
   eTimer = 0; eInterval = rand(1.5, 3.0);
   pTimer = 0; pInterval = rand(4.0, 7.0);
-  question = null;
+  question = null; celebration = null; collectedPeacock = null;
+  sBar.classList.remove('refilling');
   skyOff = 0; cloudOff = 0; gndOff = 0;
 
   isCharging = false; chargeT = 0; animT = 0;
@@ -356,7 +378,13 @@ function answerQuestion(idx) {
   const chosen = question.choices[idx];
   if (chosen === question.correct) {
     answerBtns[idx].classList.add('correct');
+    const from = stamina;
     stamina = clamp(stamina + CORRECT_GAIN, 0, MAX_STAMINA);
+    celebration = { t: 0, dur: 2.9, from, gain: stamina - from,
+      footY: hera.y + HERA_H,
+      birdX: collectedPeacock?.x ?? hera.x + 70,
+      birdY: collectedPeacock?.y ?? GY - 60 };
+    isCharging = false; chargeT = 0;
     score  += CORRECT_SCORE;
     sfxCorrect();
   } else {
@@ -429,6 +457,24 @@ function spawnEffect(x, y) {
 
 function update(dt) {
   if (state !== GameState.RUNNING) return;
+
+  if (celebration) {
+    celebration.t += dt;
+    const c = celebration;
+    const refill = rewardRefillProgress(c.t);
+    updateHUD(c.from + c.gain * refill);
+    sBar.classList.toggle('refilling', refill > 0);
+    sBar.style.setProperty('--refill-sweep', `${-100 + refill * 500}%`);
+    if (c.t >= c.dur) {
+      celebration = null;
+      sBar.classList.remove('refilling');
+      hera.y = GY - HERA_H; hera.vy = 0; hera.grounded = true;
+      hera.anim = 'run'; hera.frame = 0; hera.runPhase = 0;
+      hera.kickTimer = 0; hera.kickAnticipating = false;
+      updateHUD();
+    }
+    return; // Let the reward play without draining stamina or moving hazards.
+  }
 
   elapsed += dt;
   score   += SCORE_PER_S * dt;
@@ -504,28 +550,49 @@ function update(dt) {
   hera.kickAnticipating = false;
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
+    if (e.defeated) {
+      const fly = e.fly;
+      fly.t += dt;
+      fly.x += fly.vx * dt;
+      fly.y += fly.vy * dt;
+      fly.vy += 320 * dt;
+      // Briefly show the changed expression before the full tumble begins.
+      fly.angle = Math.max(0, fly.t - 0.09) * 8.5;
+      const radius = Math.hypot(fly.pose.dw, fly.pose.dh) / 2;
+      if (fly.x - radius > CW || fly.y - radius > CH || fly.t > 3) enemies.splice(i, 1);
+      continue; // Defeated enemies never collide or score again.
+    }
     e.x -= worldSpeed * dt;
     const visibleRight = e.type === 'bull' ? e.x + ENEMY_FRAMES.bull0.w
       : e.x + e.w / 2 + ENEMY_FRAMES[e.type + '0'].w * ENEMY_DRAW_SCALE[e.type] / 2;
     if (visibleRight < 0) { enemies.splice(i, 1); continue; }
     // Anticipation is artwork only. Predict the existing hitbox contact,
     // including Hera's airborne trajectory; never enlarge the collision box.
-    const contactIn = (e.x + 6 - (hx + hw)) / worldSpeed;
+    const bounds = enemyHitbox(e);
+    const flying = e.type === 'eagle' || e.type === 'cloud';
+    // Hera's artwork extends 32px above the old logical box. Head contact
+    // with a flying disguise should count as a kick too.
+    const heroTop = flying ? hera.y - 26 : hy;
+    const heroHeight = flying ? HERA_H + 22 : hh;
+    const contactIn = (bounds.x - (hx + hw)) / worldSpeed;
     if (!e.defeated && contactIn >= 0 && contactIn <= KICK_WINDUP) {
       const futureY = hera.grounded ? hera.y : Math.min(GY - HERA_H,
         hera.y + hera.vy * contactIn + 0.5 * GRAVITY * contactIn * contactIn);
-      if (futureY + 6 < e.y + e.h - 4 && futureY + 6 + hh > e.y + 6) {
+      const futureTop = futureY + (flying ? -26 : 6);
+      if (futureTop < bounds.y + bounds.h && futureTop + heroHeight > bounds.y) {
         hera.kickAnticipating = true;
       }
     }
-    if (!e.defeated && aabb(hx, hy, hw, hh, e.x + 6, e.y + 6, e.w - 12, e.h - 10)) {
+    if (!e.defeated && aabb(hx, heroTop, hw, heroHeight, bounds.x, bounds.y, bounds.w, bounds.h)) {
+      const pose = enemyPose(e);
+      e.fly = { pose, x: pose.dx + pose.dw / 2, y: pose.dy + pose.dh / 2,
+        vx: 780, vy: -340, angle: 0, t: 0 };
       e.defeated = true;
       score += KICK_SCORE;
       hera.anim = 'kick'; hera.kickTimer = KICK_DURATION;
       // Extend on this exact collision frame, alongside score, sound and spark.
       spawnEffect(Math.max(e.x + e.w / 2, hera.x + HERA_W / 2 + 79), hera.y + HERA_H - 69);
       sfxKick();
-      enemies.splice(i, 1);
     }
   }
 
@@ -535,6 +602,7 @@ function update(dt) {
     p.x -= worldSpeed * 0.85 * dt;
     if (p.x + p.w / 2 + ENEMY_FRAMES.peacock0.w / 2 < 0) { peacocks.splice(i, 1); continue; }
     if (!p.collected && aabb(hx, hy, hw, hh, p.x + 8, p.y + 8, p.w - 16, p.h - 12)) {
+      collectedPeacock = { x: p.x + p.w / 2, y: p.y + p.h / 2 };
       p.collected = true;
       peacocks.splice(i, 1);
       openQuestion();
@@ -556,13 +624,16 @@ function update(dt) {
     if (d.t >= d.dur) dusts.splice(i, 1);
   }
 
-  // HUD
+  updateHUD();
+}
+
+function updateHUD(displayStamina = stamina) {
   scoreVal.textContent = Math.floor(score);
-  const pct = (stamina / MAX_STAMINA) * 100;
+  const pct = (displayStamina / MAX_STAMINA) * 100;
   sFill.style.width = pct + '%';
-  sBar.setAttribute('aria-valuenow', Math.floor(stamina));
+  sBar.setAttribute('aria-valuenow', Math.floor(displayStamina));
   const flash = stamina < LOW_THRESH && Math.floor(elapsed * 4) % 2 === 0;
-  sFill.style.background = stamina < LOW_THRESH
+  sFill.style.background = celebration && rewardRefillProgress(celebration.t) > 0 ? '#79f3cc' : stamina < LOW_THRESH
     ? (flash ? '#ff3333' : '#ff8888')
     : '#f0c040';
 }
@@ -708,6 +779,134 @@ function drawHera() {
   ctx.restore();
 }
 
+function rewardSparkLaunch(i) {
+  return REWARD_SPARK_START + i * REWARD_SPARK_STAGGER;
+}
+
+function rewardRefillProgress(t) {
+  let arrived = 0;
+  for (let i = 0; i < REWARD_SPARK_COUNT; i++) {
+    arrived += clamp((t - rewardSparkLaunch(i) - REWARD_SPARK_TRAVEL) / 0.12, 0, 1);
+  }
+  return arrived / REWARD_SPARK_COUNT;
+}
+
+function celebrationSpark(i, t, c) {
+  const ease = v => 1 - Math.pow(1 - clamp(v, 0, 1), 3);
+  const a = i * Math.PI * 2 / REWARD_SPARK_COUNT + t * 5;
+  const r = 30 + ease(t / 0.8) * 50;
+  const footY = c.footY + (GY - c.footY) * ease(t / 0.35);
+  return { x: hera.x + HERA_W / 2 + Math.cos(a) * r,
+    y: footY - 65 + Math.sin(a) * (t < CELEBRATION_TURN_DURATION ? 24 : 65) };
+}
+
+function drawRewardTransfer() {
+  const c = celebration;
+  if (!c || (state !== GameState.RUNNING && state !== GameState.PAUSED)) return;
+  // Map logical game pixels to viewport pixels so sparks can cross into the HUD.
+  const game = canvas.getBoundingClientRect(), bar = sBar.getBoundingClientRect();
+  const scale = game.width / CW;
+  const pixel = Math.max(2, Math.round(3 * scale));
+  rewardCtx.save();
+  for (let i = 0; i < REWARD_SPARK_COUNT; i++) {
+    const age = c.t - rewardSparkLaunch(i);
+    if (age < 0 || age > REWARD_SPARK_TRAVEL + 0.22) continue;
+    const start = celebrationSpark(i, rewardSparkLaunch(i), c);
+    const sx = game.left + start.x * scale, sy = game.top + start.y * scale;
+    const tx = bar.left + 3 + (bar.width - 6) * (c.from + c.gain * (i + 1) / REWARD_SPARK_COUNT) / MAX_STAMINA;
+    const ty = bar.top + bar.height / 2;
+    const at = p => {
+      const q = 1 - p;
+      return { x: q*q*q*sx + 3*q*q*p*(sx + 80*scale) + 3*q*p*p*(tx - 70*scale) + p*p*p*tx,
+        y: q*q*q*sy + 3*q*q*p*(sy - 140*scale) + 3*q*p*p*(ty + 100*scale) + p*p*p*ty };
+    };
+    rewardCtx.fillStyle = i % 2 ? '#ffe28b' : '#83ffdb';
+    if (age <= REWARD_SPARK_TRAVEL) {
+      const p = age / REWARD_SPARK_TRAVEL;
+      for (let tail = 3; tail >= 0; tail--) {
+        const point = at(Math.max(0, p - tail * 0.035));
+        rewardCtx.globalAlpha = 1 - tail * 0.23;
+        rewardCtx.fillRect(Math.round(point.x), Math.round(point.y), pixel, pixel);
+        if (!tail) {
+          rewardCtx.fillRect(Math.round(point.x - pixel), Math.round(point.y + pixel / 3), pixel * 3, Math.max(1, pixel / 3));
+        }
+      }
+    } else {
+      const pop = (age - REWARD_SPARK_TRAVEL) / 0.22;
+      rewardCtx.globalAlpha = 1 - pop;
+      for (let ray = 0; ray < 4; ray++) {
+        const a = ray * Math.PI / 2;
+        rewardCtx.fillRect(Math.round(tx + Math.cos(a) * (3 + pop * 10)),
+          Math.round(ty + Math.sin(a) * (3 + pop * 10)), pixel, pixel);
+      }
+    }
+  }
+  rewardCtx.restore();
+}
+
+function drawCelebration() {
+  const c = celebration, t = c.t;
+  const cx = hera.x + HERA_W / 2;
+  const ease = v => 1 - Math.pow(1 - clamp(v, 0, 1), 3);
+  const footY = c.footY + (GY - c.footY) * ease(t / 0.35);
+  const twirl = clamp(t / CELEBRATION_TURN_DURATION, 0, 1);
+  const frame = twirl < 1
+    ? CELEBRATION_TURN_FRAMES[Math.floor(twirl * CELEBRATION_TURN_FRAMES.length)] : 8;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(cx, GY + 4, 35, 6, 0, 0, Math.PI * 2); ctx.fill();
+
+  // A ribbon of sparks circles the dancer, then blooms around the final pose.
+  const fade = clamp((c.dur - t) / 0.3, 0, 1);
+  for (let i = 0; i < REWARD_SPARK_COUNT; i++) {
+    if (t >= rewardSparkLaunch(i)) continue;
+    const { x, y } = celebrationSpark(i, t, c);
+    ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t * 6 + i));
+    ctx.fillStyle = i % 2 ? '#ffd86b' : '#75f0d0';
+    ctx.fillRect(Math.round(x), Math.round(y), 3, 3);
+  }
+  ctx.globalAlpha = 1;
+  if (celebrationImg.complete && celebrationImg.naturalWidth) {
+    ctx.save();
+    ctx.translate(cx, footY);
+    ctx.drawImage(celebrationImg, frame * 192, 0, 192, 144, -108, -132, 192, 144);
+    ctx.restore();
+  } else drawHeraFrame('recover', cx, footY);
+
+  const rise = ease(t / CELEBRATION_TURN_DURATION);
+  const flightT = Math.max(0, t - 1.65);
+  const exit = clamp(flightT / 0.95, 0, 1);
+  const travel = exit * exit * (3 - 2 * exit);
+  const bx = c.birdX + (cx - c.birdX) * rise + Math.sin(twirl * Math.PI * 2) * 24
+    - (cx + 125) * travel;
+  const by = c.birdY + (GY - 205 - c.birdY) * rise - 35 * travel
+    + (flightT > 0 ? Math.sin(flightT * Math.PI * 18) * 3 : 0);
+  ctx.save();
+  ctx.translate(Math.round(bx), Math.round(by));
+  if (flightT > 0 && peacockExitImg.complete && peacockExitImg.naturalWidth) {
+    const wing = Math.floor(flightT * 9) % 4;
+    ctx.drawImage(peacockExitImg, wing * 160, 0, 160, 160, -80, -80, 160, 160);
+  } else if (peacockFlightImg.complete && peacockFlightImg.naturalWidth) {
+    ctx.drawImage(peacockFlightImg, frame * 144, 0, 144, 128, -72, -64, 144, 128);
+  }
+  ctx.restore();
+
+  const textAlpha = Math.min(1, t / 0.18) * fade;
+  ctx.globalAlpha = textAlpha;
+  ctx.textAlign = 'left';
+  ctx.lineWidth = 5; ctx.strokeStyle = '#201437';
+  ctx.font = 'bold 24px Georgia, serif';
+  const tx = cx + 115, ty = GY - 145 - ease(t / 0.4) * 8;
+  ctx.strokeText('Correct!', tx, ty);
+  ctx.fillStyle = '#ffe18a'; ctx.fillText('Correct!', tx, ty);
+  ctx.font = 'bold 19px Georgia, serif';
+  const label = c.gain > 0 ? `+${Math.round(c.gain)} stamina` : 'Stamina full!';
+  ctx.strokeText(label, tx, ty + 29);
+  ctx.fillStyle = '#8bffe0'; ctx.fillText(label, tx, ty + 29);
+  ctx.restore();
+}
+
 function drawDebugSpriteFrame(label, name, x, y) {
   const f = HERA_FRAMES[name];
   debugCtx.imageSmoothingEnabled = false;
@@ -755,12 +954,12 @@ function drawBolt(x, y, s, color, alpha) {
   ctx.restore();
 }
 
-function drawEnemy(e) {
+function enemyPose(e) {
   const isBull = e.type === 'bull';
   const usesRedrawnSheet = e.type !== 'cloud';
-  if (usesRedrawnSheet ? !groundSpriteReady : !enemySpriteReady) return;
   const t = animT * ENEMY_ANIM_HZ[e.type] + e.phase;
-  const f = ENEMY_FRAMES[e.type + (Math.floor(t) % 2)];
+  const frame = Math.floor(t) % 2;
+  const f = ENEMY_FRAMES[e.type + frame];
 
   const scale = ENEMY_DRAW_SCALE[e.type];
   const dw = Math.round(f.w * scale), dh = Math.round(f.h * scale);
@@ -778,6 +977,58 @@ function drawEnemy(e) {
     dy = e.y + e.h / 2 - dh / 2 + Math.sin(animT * 2.6 + e.phase) * 3;
   }
 
+  return { f, frame, dx, dy, dw, dh, scale, usesRedrawnSheet };
+}
+
+// Eye coordinates are relative to each atlas frame. Warm ivory patches cover
+// the normal pupils; chunky crossed eyes rotate with the defeated sprite.
+const DAZED_EYES = {
+  bull: [[[29, 54, 3], [53, 53, 4]], [[29, 54, 3], [53, 53, 4]]],
+  eagle: [[[23, 34, 3]], [[29, 32, 3]]],
+  swan: [[[17, 15, 3]], [[18, 17, 3]]],
+  cloud: [[[31, 25, 4], [49, 24, 4]], [[31, 27, 4], [49, 26, 4]]],
+};
+
+function drawDefeatedEnemy(e) {
+  const fly = e.fly;
+  const { f, frame, dw, dh, usesRedrawnSheet } = fly.pose;
+  ctx.save();
+  ctx.translate(Math.round(fly.x), Math.round(fly.y));
+  ctx.rotate(fly.angle);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(usesRedrawnSheet ? groundImg : enemiesImg, f.x, f.y, f.w, f.h,
+    -dw / 2, -dh / 2, dw, dh);
+  ctx.translate(-dw / 2, -dh / 2);
+  ctx.scale(dw / f.w, dh / f.h);
+  for (const [x, y, r] of DAZED_EYES[e.type][frame]) {
+    ctx.fillStyle = e.type === 'cloud' ? '#dad5ec' : '#fff0ce';
+    ctx.fillRect(x - r - 1, y - r - 1, r * 2 + 3, r * 2 + 3);
+    ctx.fillStyle = '#422345';
+    for (let d = -r; d <= r; d++) {
+      ctx.fillRect(x + d, y + d, 2, 2);
+      ctx.fillRect(x + d, y - d, 2, 2);
+    }
+  }
+  ctx.restore();
+}
+
+function enemyHitbox(e) {
+  if (e.type === 'eagle' || e.type === 'cloud') {
+    const p = enemyPose(e);
+    // Follow the enlarged art, omitting transparent borders and bolt tips.
+    const insetX = e.type === 'eagle' ? 12 : 8;
+    const insetY = e.type === 'eagle' ? 10 : 7;
+    return { x: p.dx + insetX, y: p.dy + insetY,
+      w: p.dw - insetX * 2, h: p.dh - insetY * 2 };
+  }
+  return { x: e.x + 6, y: e.y + 6, w: e.w - 12, h: e.h - 10 };
+}
+
+function drawEnemy(e) {
+  const usesRedrawnSheet = e.type !== 'cloud';
+  if (usesRedrawnSheet ? !groundSpriteReady : !enemySpriteReady) return;
+  if (e.defeated) { drawDefeatedEnemy(e); return; }
+  const { f, dx, dy, dw, dh, scale } = enemyPose(e);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(usesRedrawnSheet ? groundImg : enemiesImg, f.x, f.y, f.w, f.h,
@@ -852,6 +1103,7 @@ function drawEffect(ef) {
 // ─── Render ───────────────────────────────────────────────────────────────────
 
 function render() {
+  rewardCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   ctx.clearRect(0, 0, CW, CH);
 
   if (state === GameState.LOADING) {
@@ -873,9 +1125,11 @@ function render() {
 
   for (const d of dusts) drawDust(d);
 
-  drawHera();
+  if (celebration && state !== GameState.QUESTION) drawCelebration();
+  else drawHera();
 
   for (const ef of effects) drawEffect(ef);
+  drawRewardTransfer();
 }
 
 // ─── Game loop ────────────────────────────────────────────────────────────────
@@ -893,7 +1147,7 @@ function loop(ts) {
 // ─── Input ────────────────────────────────────────────────────────────────────
 
 function startCharge() {
-  if (state !== GameState.RUNNING || !hera.grounded || isCharging) return;
+  if (state !== GameState.RUNNING || celebration || !hera.grounded || isCharging) return;
   isCharging = true;
   chargeT = 0;
 }
@@ -901,7 +1155,7 @@ function startCharge() {
 function releaseJump() {
   if (!isCharging) return;
   isCharging = false;
-  if (state !== GameState.RUNNING || !hera.grounded) { chargeT = 0; return; }
+  if (state !== GameState.RUNNING || celebration || !hera.grounded) { chargeT = 0; return; }
   const frac = clamp(chargeT / MAX_CHARGE, 0, 1);
   hera.vy = JUMP_MIN_VY + (JUMP_MAX_VY - JUMP_MIN_VY) * frac;
   hera.grounded = false;

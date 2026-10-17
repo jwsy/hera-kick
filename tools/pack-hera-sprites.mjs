@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyHeraHairPalette } from './hera-hair-palette.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'hera-atlas-'));
@@ -71,6 +72,7 @@ try {
   });
   execFileSync('magick', ['montage', ...cells, '-tile', '4x5', '-geometry', '192x144+0+0',
     '-background', 'none', join(root, 'assets/sprites/hera-sheet.png')]);
+  applyHeraHairPalette(join(root, 'assets/sprites/hera-sheet.png'));
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

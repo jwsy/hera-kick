@@ -1,4 +1,4 @@
-const CACHE = 'hera-runner-v16';
+const CACHE = 'hera-runner-v21';
 // Relative paths so the SW works under any base URL (e.g. GitHub Pages /repo-name/).
 // They resolve relative to the SW's own location at install time.
 const CORE = [
@@ -12,6 +12,9 @@ const CORE = [
   './assets/sprites/hera-sheet.png',
   './assets/sprites/enemies-sheet.png',
   './assets/sprites/ground-sheet.png',
+  './assets/sprites/hera-turn-sheet.png',
+  './assets/sprites/peacock-turn-sheet.png',
+  './assets/sprites/peacock-exit-sheet.png',
   './assets/backgrounds/olympus.png',
   './assets/backgrounds/sky-clouds.png',
 ];
